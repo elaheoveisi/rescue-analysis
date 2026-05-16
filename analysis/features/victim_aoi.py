@@ -189,6 +189,16 @@ def label_fixations_dynamic(
 # Feature computation
 # ---------------------------------------------------------------------------
 
+def _panel_features(labeled: pd.DataFrame, total_dur: float, panel_name: str) -> dict:
+    on = labeled[labeled["aoi"] == panel_name]
+    dur = float(on["duration_ms"].sum()) if not on.empty else 0.0
+    return {
+        f"n_fixations_{panel_name}": len(on),
+        f"total_dur_{panel_name}_ms": dur,
+        f"pct_dur_{panel_name}": dur / total_dur if total_dur > 0 else None,
+    }
+
+
 def _type_features(labeled: pd.DataFrame, total_dur: float, t: str) -> dict:
     on = labeled[labeled["aoi"].str.startswith(t + "_")]
     dur = float(on["duration_ms"].sum()) if not on.empty else 0.0
@@ -278,6 +288,7 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                     **meta,
                     "n_fixations_total": len(fix_df),
                     **{k: v for t in OBJECT_TYPES for k, v in _type_features(labeled, total_dur, t).items()},
+                    **{k: v for p in panel_aois for k, v in _panel_features(labeled, total_dur, p["name"]).items()},
                 })
 
                 # Save grid layout once per trial (same map for all subjects).
