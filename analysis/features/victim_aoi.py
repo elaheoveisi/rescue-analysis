@@ -280,8 +280,15 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                     **{k: v for t in OBJECT_TYPES for k, v in _type_features(labeled, total_dur, t).items()},
                 })
 
+                # Save grid layout once per trial (same map for all subjects).
+                grid_path = ROOT / cfg["paths"]["processed"] / "grids" / f"grid_{trial_match}.json"
+                if not grid_path.exists():
+                    grid_path.parent.mkdir(exist_ok=True)
+                    with open(grid_path, "w") as _f:
+                        json.dump(grid_info["grid"], _f)
+
                 if not labeled.empty:
-                    lf = labeled[["start_ms", "end_ms", "duration_ms", "x", "y", "aoi", "obj_type"]].copy()
+                    lf = labeled[["start_ms", "end_ms", "duration_ms", "x", "y", "grid_x", "grid_y", "aoi", "obj_type"]].copy()
                     for k, v in meta.items():
                         lf[k] = v
                     fix_rows.append(lf)
