@@ -1,17 +1,17 @@
 sub:
   - P001
-  - P002
-  - P003
-  - P004
-  # - P005 # Eye features are way off
-  - P006
-  - P007
-  - P008
-  - P009
-  - P010
-  - P011
-  - P012
-  - P013
+  # - P002
+  # - P003
+  # - P004
+  # # - P005 # Eye features are way off
+  # - P006
+  # - P007
+  # - P008
+  # - P009
+  # - P010
+  # - P011
+  # - P012
+  # - P013
 
 trials: [ gemini, openai, dummy ]
 # Participant expertise: expert or novice

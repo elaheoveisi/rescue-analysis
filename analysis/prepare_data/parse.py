@@ -1,6 +1,7 @@
 """Stream parsing and trial-splitting utilities."""
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,41 @@ import pandas as pd
 
 def get_stream(streams: list, name: str) -> dict | None:
     return next((s for s in streams if s["info"].get("name", [""])[0] == name), None)
+
+
+def xdf_path(subject_id: str, cfg: dict) -> Path:
+    """Return the XDF file path for a subject."""
+    raw = cfg["paths"]["raw"]
+    return (
+        Path(raw)
+        / f"sub-{subject_id}/ses-S001/sarmissiong"
+        / f"sub-{subject_id}_ses-S001_task-Default_run-001_sarmissiong.xdf"
+    )
+
+
+def extract_grids(
+    game_stream: dict, trial_field: str, include_victim_health: bool = False
+) -> dict:
+    """Return grid data from the first frame per trial that contains a 'grid' key.
+
+    Returns:
+        If include_victim_health is False: {trial_id: grid}
+        If include_victim_health is True:  {trial_id: {"grid": ..., "victim_health": ...}}
+    """
+    result: dict = {}
+    for v in game_stream["time_series"]:
+        try:
+            d = json.loads(v[0] if isinstance(v, (list, tuple)) else v)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        tid = d.get(trial_field)
+        if not tid or tid in result or "grid" not in d:
+            continue
+        if include_victim_health:
+            result[tid] = {"grid": d["grid"], "victim_health": d.get("victim_health", {})}
+        else:
+            result[tid] = d["grid"]
+    return result
 
 
 def parse_game(stream: dict, tfield: str) -> dict[str, list[dict]]:

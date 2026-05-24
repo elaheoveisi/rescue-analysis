@@ -35,6 +35,7 @@ def extract_features(cfg: dict) -> pd.DataFrame:
     offscreen_label = cfg.get("analysis", {}).get("offscreen_label", "offscreen")
     eye_cfg = cfg.get("eyetracker", {})
     expertise = cfg.get("expertise", {})
+    processed_dir = Path(cfg["paths"]["processed"])
 
     # Read the data.h5 here
     data = load_data_from_h5(cfg)
@@ -72,6 +73,21 @@ def extract_features(cfg: dict) -> pd.DataFrame:
                     f"victims={row.get('saved_victims', '?')}  "
                     f"fixations={row.get('n_fixations', '?')}  "
                     f"saccades={row.get('n_saccades', '?')}"
+                )
+
+                csv_dir = processed_dir / sub / trial_id
+                csv_dir.mkdir(parents=True, exist_ok=True)
+                et["fixations"].to_csv(
+                    csv_dir / f"run_{run_num}_fixations.csv", index=False
+                )
+                et["saccades"].to_csv(
+                    csv_dir / f"run_{run_num}_saccades.csv", index=False
+                )
+                pd.DataFrame([{**eye_features, **aoi_features}]).to_csv(
+                    csv_dir / f"run_{run_num}_eye_features.csv", index=False
+                )
+                pd.DataFrame([game_features]).to_csv(
+                    csv_dir / f"run_{run_num}_game_features.csv", index=False
                 )
 
                 rows.append(row)

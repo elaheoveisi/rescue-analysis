@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pyxdf
 
+
 from .h5 import open_store
-from .parse import get_stream, split_streams_by_trial
+from .parse import get_stream, split_streams_by_trial, xdf_path
 
 
 def process_subject(subject_id: str, cfg: dict) -> dict[str, dict[int, dict]]:
@@ -14,10 +15,7 @@ def process_subject(subject_id: str, cfg: dict) -> dict[str, dict[int, dict]]:
     Returns:
         {trial_id: {run_num: {"game": DataFrame, "eye_tracking": DataFrame}}}
     """
-    xdf_path = Path(
-        f"{cfg['paths']['raw']}/sub-{subject_id}/ses-S001/sarmissiong/sub-{subject_id}_ses-S001_task-Default_run-001_sarmissiong.xdf"
-    )
-    streams, _ = pyxdf.load_xdf(str(xdf_path))
+    streams, _ = pyxdf.load_xdf(str(xdf_path(subject_id, cfg)))
     game_stream = get_stream(streams, cfg["xdf"]["game_stream"])
     eye_stream = get_stream(streams, cfg["xdf"]["eye_stream"])
     return split_streams_by_trial(game_stream, eye_stream, cfg)
@@ -43,6 +41,7 @@ def split_all_data_by_trial(cfg: dict) -> dict:
         for sid in subjects:
             print(f"Reading data of {sid}")
             result[sid] = {}
+
             for trial_id, runs in process_subject(sid, cfg).items():
                 trial = next((t for t in trials if t in trial_id), None)
                 if trial is None:

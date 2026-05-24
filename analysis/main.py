@@ -18,7 +18,7 @@ with skip_run("skip", "split_data_by_trial") as check, check():
 with skip_run("skip", "vs_mot_classification") as check, check():
     run_vs_mot_kmeans(Path(cfg["paths"]["raw"]), Path(cfg["paths"]["processed"]))
 
-with skip_run("skip", "extract_features") as check, check():
+with skip_run("run", "extract_features") as check, check():
     df = extract_features(cfg)
     processed_dir = Path(cfg["paths"]["processed"])
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -26,7 +26,7 @@ with skip_run("skip", "extract_features") as check, check():
     df.to_csv(out, index=False)
     print(f"\nfeatures -> {out}")
 
-with skip_run("run", "mixed_effect_model") as check, check():
+with skip_run("skip", "mixed_effect_model") as check, check():
     # Read the df
     df = pd.read_csv("data/processed/features_all_subjects.csv")
     glmm_results = run_glmmsecond(cfg, dataframes={"best_features": df})
