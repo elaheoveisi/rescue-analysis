@@ -12,67 +12,57 @@ import pyxdf
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from features.aoi_fixation import label_fixations, DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
 from features.eye_tracking_features import run_eyetracking
 from features.gaze_entropy import _sge, _gte, build_transition_matrix
+from features.grid import cam_bounds, extract_run_grid, best_runs
 from prepare_data.parse import get_stream, xdf_path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-_WALL, _LAVA, _VICTIM, _FAKE_VICTIM = 1, 4, 5, 6
-_DOOR_BASE, _DOOR_END = 10, 28
-_KEY_BASE, _KEY_END = 30, 36
-
-# Defined once — used for feature extraction, iteration, and visualization import.
-OBJECT_TYPES = ("victim", "fake_victim", "door", "key", "lava")
-
-# Fallback viewport half-size when cam_ fields are absent (mirrors observations.py).
-_CAM_FALLBACK_HALF = 6
-
 
 # ---------------------------------------------------------------------------
-# Tile → AOI label
+# Config-driven tile → AOI label
 # ---------------------------------------------------------------------------
 
-def _tile_to_label(tile: int, gx: int, gy: int) -> str:
-    """Position-encoded label, e.g. 'victim_3_5' or 'door_7_2'."""
-    if tile == _VICTIM:
-        return f"victim_{gx}_{gy}"
-    if tile == _FAKE_VICTIM:
-        return f"fake_victim_{gx}_{gy}"
-    if tile == _LAVA:
-        return f"lava_{gx}_{gy}"
-    if _DOOR_BASE <= tile < _DOOR_END:
-        return f"door_{gx}_{gy}"
-    if _KEY_BASE <= tile < _KEY_END:
-        return f"key_{gx}_{gy}"
-    return "wall" if tile == _WALL else "empty"
+def _build_tile_labeler(tile_aois: list[dict]):
+
+    exact: dict[int, tuple[str, bool]] = {}
+    ranges: list[tuple[int, int, str, bool]] = []
+    for a in tile_aois:
+        positional = a.get("positional", True)
+        if "tile_id" in a:
+            exact[int(a["tile_id"])] = (a["name"], positional)
+        elif "tile_id_min" in a:
+            ranges.append((int(a["tile_id_min"]), int(a["tile_id_max"]), a["name"], positional))
+
+    def _label(tile: int, gx: int, gy: int) -> str:
+        if tile in exact:
+            name, positional = exact[tile]
+            return f"{name}_{gx}_{gy}" if positional else name
+        for lo, hi, name, positional in ranges:
+            if lo <= tile < hi:
+                return f"{name}_{gx}_{gy}" if positional else name
+        return "empty"
+
+    return _label
 
 
-def _make_aoi_to_type(panel_names: frozenset):
-    """Return a function mapping an AOI label to its type string."""
+def _object_types(tile_aois: list[dict]) -> tuple[str, ...]:
+    """Ordered tuple of trackable object type names (positional tile AOIs)."""
+    return tuple(a["name"] for a in tile_aois if a.get("positional", True))
+
+
+def _make_aoi_to_type(panel_names: frozenset, object_types: tuple[str, ...]):
+    """Return a function mapping an AOI label to its object-type string."""
     def _fn(aoi: str) -> str:
-        # Check fake_victim before victim (both start with letters, but keep explicit order)
-        for t in OBJECT_TYPES:
+        for t in object_types:
             if aoi.startswith(t + "_"):
                 return t
         if aoi in panel_names:
             return aoi
         return "offscreen" if aoi == "offscreen" else "other"
     return _fn
-
-
-# ---------------------------------------------------------------------------
-# Find what part of the grid the player can currently see
-# ---------------------------------------------------------------------------
-
-def _cam_bounds(game_row: pd.Series) -> tuple[int, int, int, int]:
-    """(x0, y0, x1, y1) of visible viewport in grid coordinates."""
-    if "cam_top_x" in game_row.index and pd.notna(game_row.get("cam_top_x")):
-        x0, y0 = int(game_row["cam_top_x"]), int(game_row["cam_top_y"])
-        return x0, y0, x0 + int(game_row["cam_view_w"]), y0 + int(game_row["cam_view_h"])
-    ax, ay = int(game_row.get("agent_x", 0)), int(game_row.get("agent_y", 0))
-    h = _CAM_FALLBACK_HALF
-    return ax - h, ay - h, ax + h + 1, ay + h + 1
 
 
 # ---------------------------------------------------------------------------
@@ -86,18 +76,28 @@ def label_fixations_dynamic(
     grid: list[list[int]],
     game_aoi: dict,
     panel_aois: list[dict],
+    tile_aois: list[dict],
 ) -> pd.DataFrame:
-    """Label each fixation dynamically based on the current camera viewport."""
-    df = fix_df.copy()
-    df["aoi"] = "offscreen"
+    """Label each fixation dynamically based on the current camera viewport.
+
+    Static panel AOIs (info_panel, chat_panel, …) are labeled first by
+    delegating to ``label_fixations`` from ``aoi_fixation``.  Fixations that
+    remain "offscreen" after that step are mapped to dynamic grid tiles using
+    the game camera viewport at the time of each fixation.  Tile-type
+    definitions (victim, door, key, …) are read from ``tile_aois`` so no
+    game-design constants are hardcoded here.
+    """
+    # Step 1 — static panel labels (reuses shared label_fixations from aoi_fixation).
+    df = label_fixations(fix_df, panel_aois)
     df["obj_type"] = pd.Series(dtype=str)
     df["grid_x"] = np.nan
     df["grid_y"] = np.nan
 
     panel_names = frozenset(p["name"] for p in panel_aois)
-    aoi_to_type = _make_aoi_to_type(panel_names)
+    tile_labeler = _build_tile_labeler(tile_aois)
+    aoi_to_type = _make_aoi_to_type(panel_names, _object_types(tile_aois))
 
-    # Fixation start_ms is ms from the first eye sample; convert to XDF seconds.
+    # Pre-compute the game frame index that aligns with each fixation onset.
     t0_xdf = float(eye_df["timestamp"].iloc[0])
     game_ts = game_df["timestamp"].values.astype(float)
     fix_xdf = t0_xdf + df["start_ms"].values.astype(float) / 1000.0
@@ -107,25 +107,23 @@ def label_fixations_dynamic(
     sy0, sy1 = float(game_aoi["y_min"]), float(game_aoi["y_max"])
     grid_h, grid_w = len(grid), len(grid[0]) if grid else 0
 
+    # Step 2 — dynamic grid mapping for fixations not claimed by a panel AOI.
     for i, (row_idx, row) in enumerate(df.iterrows()):
-        px, py = float(row["x"]), float(row["y"])
+        if row["aoi"] != _OFFSCREEN:
+            continue  # already labeled by a static panel
 
-        for panel in panel_aois:
-            if panel["x_min"] <= px <= panel["x_max"] and panel["y_min"] <= py <= panel["y_max"]:
-                df.at[row_idx, "aoi"] = panel["name"]
-                break
-        else:
-            if sx0 <= px <= sx1 and sy0 <= py <= sy1:
-                cx0, cy0, cx1, cy1 = _cam_bounds(game_df.iloc[int(frame_idx[i])])
-                vw, vh = cx1 - cx0, cy1 - cy0
-                if vw > 0 and vh > 0:
-                    gx = cx0 + int((px - sx0) / ((sx1 - sx0) / vw))
-                    gy = cy0 + int((py - sy0) / ((sy1 - sy0) / vh))
-                    gx = max(0, min(gx, grid_w - 1))
-                    gy = max(0, min(gy, grid_h - 1))
-                    df.at[row_idx, "aoi"] = _tile_to_label(int(grid[gy][gx]), gx, gy)
-                    df.at[row_idx, "grid_x"] = gx
-                    df.at[row_idx, "grid_y"] = gy
+        px, py = float(row["x"]), float(row["y"])
+        if sx0 <= px <= sx1 and sy0 <= py <= sy1:
+            cx0, cy0, cx1, cy1 = cam_bounds(game_df.iloc[int(frame_idx[i])])
+            vw, vh = cx1 - cx0, cy1 - cy0
+            if vw > 0 and vh > 0:
+                gx = cx0 + int((px - sx0) / ((sx1 - sx0) / vw))
+                gy = cy0 + int((py - sy0) / ((sy1 - sy0) / vh))
+                gx = max(0, min(gx, grid_w - 1))
+                gy = max(0, min(gy, grid_h - 1))
+                df.at[row_idx, "aoi"] = tile_labeler(int(grid[gy][gx]), gx, gy)
+                df.at[row_idx, "grid_x"] = gx
+                df.at[row_idx, "grid_y"] = gy
 
     df["obj_type"] = df["aoi"].apply(aoi_to_type)
     return df
@@ -157,66 +155,6 @@ def _type_features(labeled: pd.DataFrame, total_dur: float, t: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Per-run grid extraction
-# ---------------------------------------------------------------------------
-
-def _extract_run_grid(game_stream: dict, game_df: pd.DataFrame) -> dict | None:
-    """Return the most recent grid emitted at or before this run's first game frame.
-
-    The game emits a grid frame at episode reset, which happens between the
-    previous run's end and this run's first timestamped game step. Searching
-    strictly within [t0, t1] misses that frame for any run after the first.
-    """
-    t0 = float(game_df["timestamp"].iloc[0])
-    last_grid: dict | None = None
-    for ts, v in zip(game_stream["time_stamps"], game_stream["time_series"]):
-        if ts > t0:
-            break
-        try:
-            d = json.loads(v[0] if isinstance(v, (list, tuple)) else v)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if "grid" in d:
-            last_grid = {"grid": d["grid"], "victim_health": d.get("victim_health", {})}
-    return last_grid
-
-
-# ---------------------------------------------------------------------------
-# Best-run selection
-# ---------------------------------------------------------------------------
-
-def _best_runs(store: pd.HDFStore, cfg: dict) -> set[tuple[str, str, int]]:
-    """Return {(sid, trial_match, run_num)} keeping only the highest-metric run per subject/trial.
-
-    Metric is cfg["glmm2"]["best_run_metric"] (default: "saved_victims").
-    """
-    metric = cfg.get("glmm2", {}).get("best_run_metric", "saved_victims")
-    trials_cfg = [str(t) for t in cfg.get("trials", [])]
-
-    records: list[tuple[str, str, int, float]] = []
-    for key in store.keys():
-        if not key.endswith("/game"):
-            continue
-        parts = key.strip("/").split("/")
-        sid, trial_h5, run_dir = parts[0], parts[1], parts[2]
-        run_num = int(run_dir.replace("run_", ""))
-        trial_match = next((t for t in trials_cfg if t in trial_h5), None)
-        if trial_match is None:
-            continue
-        game_df = store[key]
-        val = float(game_df[metric].max()) if metric in game_df.columns else 0.0
-        records.append((sid, trial_match, run_num, val))
-
-    best: set[tuple[str, str, int]] = set()
-    seen: set[tuple[str, str]] = set()
-    for sid, trial, run_num, val in sorted(records, key=lambda r: (r[0], r[1], -r[3])):
-        if (sid, trial) not in seen:
-            best.add((sid, trial, run_num))
-            seen.add((sid, trial))
-    return best
-
-
-# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -228,16 +166,25 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
       {processed}/object_aoi_transitions.csv
     """
     h5_path = ROOT / cfg["paths"]["processed"] / "data.h5"
-    game_aoi = next(a for a in cfg["aoi"] if a["name"] == "game_area")
-    panel_aois = [a for a in cfg["aoi"] if a["name"] != "game_area"]
+    # Derive AOI roles from the config `type` field (dynamic = game viewport,
+    # static = fixed panel bounding box).  Fallback: treat "game_area" as
+    # dynamic for configs that pre-date the type field.
+    game_aoi = next(
+        (a for a in cfg["aoi"] if a.get("type") == "dynamic"),
+        next(a for a in cfg["aoi"] if a["name"] == "game_area"),
+    )
+    panel_aois = [a for a in cfg["aoi"] if a.get("type", "static") == "static"]
+    tile_aois  = [a for a in cfg["aoi"] if a.get("type") == "tile"]
+    obj_types  = _object_types(tile_aois)   # e.g. (fake_victim, victim, lava, door, key)
     panel_names = [a["name"] for a in panel_aois]
-    trans_types = list(OBJECT_TYPES) + panel_names + ["other"]
+    trans_types = list(obj_types) + panel_names + ["other"]
     gte_types = ["victim"] + panel_names
+    trials_cfg = [str(t) for t in cfg.get("trials", [])]
 
     feat_rows, trans_rows, fix_rows = [], [], []
 
     with pd.HDFStore(str(h5_path), mode="r") as store:
-        best_runs = _best_runs(store, cfg)
+        best_runs_set = best_runs(store, trials_cfg, cfg)
         for sid in [str(s) for s in cfg.get("sub", [])]:
             print(f"Processing {sid}")
             try:
@@ -251,8 +198,6 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 print(f"  No game stream for {sid}, skipping")
                 continue
 
-            trials_cfg = [str(t) for t in cfg.get("trials", [])]
-
             for eye_key in [k for k in store.keys() if f"/{sid}/" in k and k.endswith("/eye_tracking")]:
                 game_key = eye_key.replace("/eye_tracking", "/game")
                 if game_key not in store:
@@ -265,13 +210,13 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 if trial_match is None:
                     continue
 
-                if (sid, trial_match, run_num) not in best_runs:
+                if (sid, trial_match, run_num) not in best_runs_set:
                     continue
 
                 eye_df = store[eye_key]
                 game_df = store[game_key]
 
-                grid_info = _extract_run_grid(game_stream, game_df)
+                grid_info = extract_run_grid(game_stream, game_df)
                 if grid_info is None:
                     print(f"  No grid for {sid}/{trial_match}, skipping")
                     continue
@@ -281,7 +226,7 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 total_dur = float(fix_df["duration_ms"].sum()) if not fix_df.empty else 0.0
 
                 labeled = label_fixations_dynamic(
-                    fix_df, game_df, eye_df, grid_info["grid"], game_aoi, panel_aois
+                    fix_df, game_df, eye_df, grid_info["grid"], game_aoi, panel_aois, tile_aois
                 )
 
                 matrix = build_transition_matrix(labeled, trans_types)
@@ -290,7 +235,7 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 feat_rows.append({
                     **meta,
                     "n_fixations_total": len(fix_df),
-                    **{k: v for t in OBJECT_TYPES for k, v in _type_features(labeled, total_dur, t).items()},
+                    **{k: v for t in obj_types for k, v in _type_features(labeled, total_dur, t).items()},
                     **{k: v for p in panel_aois for k, v in _panel_features(labeled, total_dur, p["name"]).items()},
                     "sge": _sge(labeled),
                     "gte": _gte(gte_matrix),

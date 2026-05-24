@@ -31,7 +31,9 @@ def extract_features(cfg: dict) -> pd.DataFrame:
     Returns:
         DataFrame with one row per run.
     """
-    aois = cfg.get("aoi", [])
+    all_aois = cfg.get("aoi", [])
+    # Static AOIs only — dynamic (game_area) is handled by victim_aoi.py.
+    aois = [a for a in all_aois if a.get("type", "static") == "static"]
     offscreen_label = cfg.get("analysis", {}).get("offscreen_label", "offscreen")
     eye_cfg = cfg.get("eyetracker", {})
     expertise = cfg.get("expertise", {})

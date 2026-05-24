@@ -60,7 +60,7 @@ def run_entropy(cfg: dict) -> pd.DataFrame:
     processed = ROOT / cfg["paths"]["processed"]
     fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
 
-    panel_names = [a["name"] for a in cfg["aoi"] if a["name"] != "game_area"]
+    panel_names = [a["name"] for a in cfg["aoi"] if a.get("type", "static") == "static"]
     gte_types = ["victim"] + panel_names
 
     rows = []

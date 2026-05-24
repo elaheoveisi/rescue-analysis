@@ -121,20 +121,54 @@ saccade:
     ]
 
 aoi:
+  # ── Screen-space AOIs ──────────────────────────────────────────────────────
   - name: game_area
+    type: dynamic      # viewport: fixations mapped to grid tiles at runtime
     x_min: 150
     y_min: 0
     x_max: 1230
     y_max: 1080
 
   - name: info_panel
+    type: static       # fixed bounding-box UI panel
     x_min: 1230
     y_min: 0
     x_max: 1770
     y_max: 540
 
   - name: chat_panel
+    type: static       # fixed bounding-box UI panel
     x_min: 1230
     y_min: 540
     x_max: 1770
     y_max: 1080
+
+  # ── Grid tile AOIs (identified by game tile ID, inside game_area) ──────────
+  # positional: true (default) → label includes grid coords, e.g. victim_3_5
+  # positional: false          → label is just the name (many instances, not tracked)
+  - name: victim
+    type: tile
+    tile_id: 5
+
+  - name: fake_victim
+    type: tile
+    tile_id: 6
+
+  - name: lava
+    type: tile
+    tile_id: 4
+
+  - name: door
+    type: tile
+    tile_id_min: 10    # inclusive
+    tile_id_max: 28    # exclusive
+
+  - name: key
+    type: tile
+    tile_id_min: 30    # inclusive
+    tile_id_max: 36    # exclusive
+
+  - name: wall
+    type: tile
+    tile_id: 1
+    positional: false  # label as "wall", not "wall_x_y" — not tracked per instance
