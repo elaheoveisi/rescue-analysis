@@ -92,6 +92,10 @@ def label_fixations_dynamic(
     df["obj_type"] = pd.Series(dtype=str)
     df["grid_x"] = np.nan
     df["grid_y"] = np.nan
+    df["tile_pixel_x_min"] = np.nan
+    df["tile_pixel_x_max"] = np.nan
+    df["tile_pixel_y_min"] = np.nan
+    df["tile_pixel_y_max"] = np.nan
 
     panel_names = frozenset(p["name"] for p in panel_aois)
     tile_labeler = _build_tile_labeler(tile_aois)
@@ -124,6 +128,12 @@ def label_fixations_dynamic(
                 df.at[row_idx, "aoi"] = tile_labeler(int(grid[gy][gx]), gx, gy)
                 df.at[row_idx, "grid_x"] = gx
                 df.at[row_idx, "grid_y"] = gy
+                tile_pw = (sx1 - sx0) / vw
+                tile_ph = (sy1 - sy0) / vh
+                df.at[row_idx, "tile_pixel_x_min"] = sx0 + (gx - cx0) * tile_pw
+                df.at[row_idx, "tile_pixel_x_max"] = sx0 + (gx - cx0 + 1) * tile_pw
+                df.at[row_idx, "tile_pixel_y_min"] = sy0 + (gy - cy0) * tile_ph
+                df.at[row_idx, "tile_pixel_y_max"] = sy0 + (gy - cy0 + 1) * tile_ph
 
     df["obj_type"] = df["aoi"].apply(aoi_to_type)
     return df
@@ -251,7 +261,7 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 )
 
                 if not labeled.empty:
-                    lf = labeled[["start_ms", "end_ms", "duration_ms", "x", "y", "grid_x", "grid_y", "aoi", "obj_type"]].copy()
+                    lf = labeled[["start_ms", "end_ms", "duration_ms", "x", "y", "grid_x", "grid_y", "tile_pixel_x_min", "tile_pixel_x_max", "tile_pixel_y_min", "tile_pixel_y_max", "aoi", "obj_type"]].copy()
                     for k, v in meta.items():
                         lf[k] = v
                     fix_rows.append(lf)
