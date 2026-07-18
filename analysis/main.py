@@ -3,10 +3,13 @@ from pathlib import Path
 import pandas as pd
 import yaml
 from features.extract_features import extract_features
+from features.gaze_entropy import run_entropy
+from features.victim_aoi import run_object_aoi
 from features.vs_mot_kmeans import run_vs_mot_kmeans
 from model.glmm import run_all as run_glmmsecond
 from prepare_data.data import split_all_data_by_trial
 from utils import skip_run
+from validate_aoi_fixations import run_validation
 
 with open("configs/analysis.yml") as f:
     cfg = yaml.safe_load(f)
@@ -18,7 +21,16 @@ with skip_run("skip", "split_data_by_trial") as check, check():
 with skip_run("skip", "vs_mot_classification") as check, check():
     run_vs_mot_kmeans(Path(cfg["paths"]["raw"]), Path(cfg["paths"]["processed"]))
 
-with skip_run("run", "extract_features") as check, check():
+with skip_run("skip", "victim_aoi") as check, check():
+    run_object_aoi(cfg)
+
+with skip_run("skip", "validate_victim_aoi") as check, check():
+    run_validation(cfg)
+
+with skip_run("run", "gaze_entropy") as check, check():
+    run_entropy(cfg)
+
+with skip_run("skip", "extract_features") as check, check():
     df = extract_features(cfg)
     processed_dir = Path(cfg["paths"]["processed"])
     processed_dir.mkdir(parents=True, exist_ok=True)

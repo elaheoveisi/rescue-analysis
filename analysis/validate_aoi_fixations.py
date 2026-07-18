@@ -5,20 +5,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-root = Path(__file__).resolve().parents[1]
-fix_csv = root / "data" / "processed" / "object_aoi_fixations.csv"
+ROOT = Path(__file__).resolve().parents[1]
 
-with open(root / "configs" / "analysis.yml") as f:
-    cfg = yaml.safe_load(f)
-
-aois = {a["name"]: a for a in cfg["aoi"]}
-screen_w = cfg["eyetracker"]["screen_w"]
-screen_h = cfg["eyetracker"]["screen_h"]
-
-n_samples = 6   # how many fixations to show
+N_SAMPLES = 6   # how many fixations to show
 
 
-def draw_screen(ax):
+def draw_screen(ax, aois: dict, screen_w: int, screen_h: int):
     """Draw the static screen layout (game area + panels) as background."""
     ax.set_xlim(0, screen_w)
     ax.set_ylim(screen_h, 0)   # y increases downward like screen coords
@@ -45,7 +37,15 @@ def draw_screen(ax):
     ax.set_yticks([])
 
 
-def plot_validation(df: pd.DataFrame, obj_type_filter: str = "victim", n: int = n_samples):
+def plot_validation(
+    df: pd.DataFrame,
+    aois: dict,
+    screen_w: int,
+    screen_h: int,
+    obj_type_filter: str = "victim",
+    n: int = N_SAMPLES,
+    show: bool = True,
+):
     mask = (df["obj_type"] == obj_type_filter) & df["tile_pixel_x_min"].notna()
     victims = df[mask].sample(min(n, mask.sum()), random_state=42)
 
@@ -59,7 +59,7 @@ def plot_validation(df: pd.DataFrame, obj_type_filter: str = "victim", n: int = 
     axes = axes.flatten()
 
     for ax, (_, row) in zip(axes, victims.iterrows()):
-        draw_screen(ax)
+        draw_screen(ax, aois, screen_w, screen_h)
 
         # Green box = the tile the code labeled as victim
         tx0 = row["tile_pixel_x_min"]
@@ -93,14 +93,31 @@ def plot_validation(df: pd.DataFrame, obj_type_filter: str = "victim", n: int = 
         fontsize=13, fontweight="bold"
     )
     plt.tight_layout()
-    out = root / "data" / "processed" / f"validate_{obj_type_filter}_fixations.png"
+    out = ROOT / "data" / "processed" / f"validate_{obj_type_filter}_fixations.png"
     plt.savefig(out, dpi=150)
     print(f"Saved → {out}")
-    plt.show()
+    if show:
+        plt.show()
 
 
-if __name__ == "__main__":
+def run_validation(cfg: dict, obj_type_filter: str = "victim", n: int = N_SAMPLES, show: bool = True):
+    """Validate victim AOI fixation labeling against the tile bounding boxes.
+
+    Reads {processed}/object_aoi_fixations.csv (written by ``run_object_aoi``)
+    and saves a sanity-check figure to {processed}/validate_{obj_type_filter}_fixations.png.
+    """
+    fix_csv = ROOT / cfg["paths"]["processed"] / "object_aoi_fixations.csv"
+    aois = {a["name"]: a for a in cfg["aoi"]}
+    screen_w = cfg["eyetracker"]["screen_w"]
+    screen_h = cfg["eyetracker"]["screen_h"]
+
     df = pd.read_csv(fix_csv)
     print(f"Loaded {len(df)} fixations")
     print(f"obj_type counts:\n{df['obj_type'].value_counts()}\n")
-    plot_validation(df, obj_type_filter="victim")
+    plot_validation(df, aois, screen_w, screen_h, obj_type_filter=obj_type_filter, n=n, show=show)
+
+
+if __name__ == "__main__":
+    with open(ROOT / "configs" / "analysis.yml") as f:
+        cfg = yaml.safe_load(f)
+    run_validation(cfg)
