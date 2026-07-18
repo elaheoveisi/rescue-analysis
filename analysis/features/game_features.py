@@ -7,7 +7,9 @@ def extract_game_features(game_data) -> dict:
     else:
         reward_df = game_data[["step_count", "reward"]].copy()
         reward_df["reward"] = pd.to_numeric(reward_df["reward"], errors="coerce")
-        reward_df["step_count"] = pd.to_numeric(reward_df["step_count"], errors="coerce")
+        reward_df["step_count"] = pd.to_numeric(
+            reward_df["step_count"], errors="coerce"
+        )
         reward_df = reward_df.dropna(subset=["step_count"])
 
         def one_reward_per_step(step_rewards: pd.Series) -> float:
@@ -29,7 +31,11 @@ def extract_game_features(game_data) -> dict:
         if "llm_response" in game_data.columns
         else None,
         "saved_victims": saved_victims,
-        "mean_reward": float(deduped_reward.mean()) if not deduped_reward.empty else None,
-        "total_reward": float(deduped_reward.sum()) if not deduped_reward.empty else None,
+        "mean_reward": float(deduped_reward.mean())
+        if not deduped_reward.empty
+        else None,
+        "total_reward": float(deduped_reward.sum())
+        if not deduped_reward.empty
+        else None,
         "victims_per_step": (saved_victims / max_steps) if max_steps else None,
     }
