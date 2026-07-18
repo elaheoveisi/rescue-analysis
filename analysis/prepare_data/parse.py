@@ -40,7 +40,10 @@ def extract_grids(
         if not tid or tid in result or "grid" not in d:
             continue
         if include_victim_health:
-            result[tid] = {"grid": d["grid"], "victim_health": d.get("victim_health", {})}
+            result[tid] = {
+                "grid": d["grid"],
+                "victim_health": d.get("victim_health", {}),
+            }
         else:
             result[tid] = d["grid"]
     return result
@@ -109,10 +112,21 @@ def split_streams_by_trial(
 
     result: dict[str, dict[int, dict[str, pd.DataFrame]]] = {}
     for tid, rows in trials.items():
-        end_positions = sorted(set(
-            [i for i, row in enumerate(rows) if any(row.get(col) for col in end_fields)]
-            + [i for i in range(1, len(rows)) if (rows[i].get("step_count", 1) or 1) < (rows[i - 1].get("step_count", 0) or 0)]
-        ))
+        end_positions = sorted(
+            set(
+                [
+                    i
+                    for i, row in enumerate(rows)
+                    if any(row.get(col) for col in end_fields)
+                ]
+                + [
+                    i
+                    for i in range(1, len(rows))
+                    if (rows[i].get("step_count", 1) or 1)
+                    < (rows[i - 1].get("step_count", 0) or 0)
+                ]
+            )
+        )
         starts = [0] + [p + 1 for p in end_positions]
         ends = [p + 1 for p in end_positions] + [len(rows)]
 

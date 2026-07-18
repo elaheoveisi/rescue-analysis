@@ -12,7 +12,12 @@ def cam_bounds(game_row: pd.Series) -> tuple[int, int, int, int]:
     """(x0, y0, x1, y1) of visible viewport in grid coordinates."""
     if "cam_top_x" in game_row.index and pd.notna(game_row.get("cam_top_x")):
         x0, y0 = int(game_row["cam_top_x"]), int(game_row["cam_top_y"])
-        return x0, y0, x0 + int(game_row["cam_view_w"]), y0 + int(game_row["cam_view_h"])
+        return (
+            x0,
+            y0,
+            x0 + int(game_row["cam_view_w"]),
+            y0 + int(game_row["cam_view_h"]),
+        )
     ax, ay = int(game_row.get("agent_x", 0)), int(game_row.get("agent_y", 0))
     h = _CAM_FALLBACK_HALF
     return ax - h, ay - h, ax + h + 1, ay + h + 1
@@ -48,15 +53,24 @@ def best_runs(
     """
     metric = cfg.get("glmm2", {}).get("best_run_metric", "saved_victims")
     return set(
-        pd.DataFrame([
-            {"sid": p[0],
-             "trial": next((t for t in trials_cfg if t in p[1]), None),
-             "run": int(p[2].replace("run_", "")),
-             metric: float(store[k][metric].max()) if metric in store[k].columns else 0.0}
-            for k in store.keys() if k.endswith("/game")
-            for p in [k.strip("/").split("/")]
-        ]).dropna(subset=["trial"])
+        pd.DataFrame(
+            [
+                {
+                    "sid": p[0],
+                    "trial": next((t for t in trials_cfg if t in p[1]), None),
+                    "run": int(p[2].replace("run_", "")),
+                    metric: float(store[k][metric].max())
+                    if metric in store[k].columns
+                    else 0.0,
+                }
+                for k in store.keys()
+                if k.endswith("/game")
+                for p in [k.strip("/").split("/")]
+            ]
+        )
+        .dropna(subset=["trial"])
         .sort_values(metric, ascending=False)
-        .groupby(["sid", "trial"], as_index=False).first()
-        [["sid", "trial", "run"]].itertuples(index=False, name=None)
+        .groupby(["sid", "trial"], as_index=False)
+        .first()[["sid", "trial", "run"]]
+        .itertuples(index=False, name=None)
     )

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pyxdf
 
-
 from .h5 import open_store
 from .parse import get_stream, split_streams_by_trial, xdf_path
 
