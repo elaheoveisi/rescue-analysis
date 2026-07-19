@@ -7,18 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
-<<<<<<< HEAD
 N_SAMPLES = 6   # how many fixations to show
-=======
-with open(root / "configs" / "analysis.yml") as f:
-    cfg = yaml.safe_load(f)
-
-aois = {a["name"]: a for a in cfg["aoi"]}
-screen_w = cfg["eyetracker"]["screen_w"]
-screen_h = cfg["eyetracker"]["screen_h"]
-
-n_samples = 6  # how many fixations to show
->>>>>>> fdabb0aa26122d117290d0a8bf6d2a116eab47f0
 
 
 def draw_screen(ax, aois: dict, screen_w: int, screen_h: int):
@@ -55,7 +44,6 @@ def draw_screen(ax, aois: dict, screen_w: int, screen_h: int):
 
 
 def plot_validation(
-<<<<<<< HEAD
     df: pd.DataFrame,
     aois: dict,
     screen_w: int,
@@ -63,9 +51,6 @@ def plot_validation(
     obj_type_filter: str = "victim",
     n: int = N_SAMPLES,
     show: bool = True,
-=======
-    df: pd.DataFrame, obj_type_filter: str = "victim", n: int = n_samples
->>>>>>> fdabb0aa26122d117290d0a8bf6d2a116eab47f0
 ):
     mask = (df["obj_type"] == obj_type_filter) & df["tile_pixel_x_min"].notna()
     victims = df[mask].sample(min(n, mask.sum()), random_state=42)
