@@ -5,6 +5,7 @@ import yaml
 from features.extract_features import extract_features
 from features.vs_mot_kmeans import run_vs_mot_kmeans
 from model.glmm import run_all as run_glmmsecond
+from model.power_analysis import run as run_power_analysis
 from prepare_data.data import split_all_data_by_trial
 from utils import skip_run
 
@@ -37,3 +38,6 @@ with skip_run("skip", "mixed_effect_model") as check, check():
         out.parent.mkdir(parents=True, exist_ok=True)
         glmm_results.to_csv(out, index=False)
         print(f"\nglmmsecond -> {out}")
+
+with skip_run("skip", "power_analysis") as check, check():
+    run_power_analysis(cfg)
