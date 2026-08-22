@@ -35,7 +35,6 @@ paths:
   raw: data/raw # raw XDF files per subject
   interim: data/interim
   processed: data/processed # output of fixations/saccades
-  mosaic_src: ../mosaic/src # sibling repo, needed only by optimal_pickup_analysis
 
 analysis:
   offscreen_label: offscreen
