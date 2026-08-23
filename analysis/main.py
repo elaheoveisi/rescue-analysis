@@ -6,6 +6,9 @@ from features.extract_features import extract_features
 from features.gaze_entropy import run_entropy
 from features.victim_aoi import run_object_aoi
 from features.vs_mot_kmeans import run_vs_mot_kmeans
+from trigger.efficiency_trajectory import run_efficiency_trajectory_analysis
+from trigger.optimal_pickup import run_optimal_pickup_analysis
+from trigger.trust_trigger import run_lie_cycle_analysis
 from model.glmm import run_all as run_glmmsecond
 from prepare_data.data import split_all_data_by_trial
 from utils import skip_run
@@ -30,7 +33,7 @@ with skip_run("skip", "validate_victim_aoi") as check, check():
 with skip_run("run", "gaze_entropy") as check, check():
     run_entropy(cfg)
 
-with skip_run("run", "extract_features") as check, check():
+with skip_run("skip", "extract_features") as check, check():
     df = extract_features(cfg)
     processed_dir = Path(cfg["paths"]["processed"])
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -49,3 +52,12 @@ with skip_run("skip", "mixed_effect_model") as check, check():
         out.parent.mkdir(parents=True, exist_ok=True)
         glmm_results.to_csv(out, index=False)
         print(f"\nglmmsecond -> {out}")
+
+with skip_run("skip", "trend_analysis") as check, check():
+    run_efficiency_trajectory_analysis(cfg)
+
+with skip_run("skip", "trigger_analysis") as check, check():
+    run_lie_cycle_analysis(cfg)
+
+with skip_run("skip", "optimal_pickup_analysis") as check, check():
+    run_optimal_pickup_analysis(cfg)
