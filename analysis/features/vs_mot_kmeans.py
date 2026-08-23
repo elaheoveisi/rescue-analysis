@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -79,26 +78,3 @@ def run_vs_mot_kmeans(raw_dir: Path, output_dir: Path) -> dict[str, pd.DataFrame
     skipped.to_csv(skipped_path, index=False)
 
     return {"subject_clusters": combined, "summary": summary, "skipped": skipped}
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--raw-dir", default="data/raw")
-    parser.add_argument("--output-dir", default="data/processed")
-    args = parser.parse_args()
-
-    results = run_vs_mot_kmeans(Path(args.raw_dir), Path(args.output_dir))
-
-    print("\nPredicted subject expertise:")
-    print(
-        results["subject_clusters"][["subject_id", "predicted_expertise"]].to_string(
-            index=False
-        )
-    )
-
-    if not results["skipped"].empty:
-        print("\nSkipped:", results["skipped"].to_string(index=False))
-
-
-if __name__ == "__main__":
-    main()

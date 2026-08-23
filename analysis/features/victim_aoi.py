@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyxdf
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from features.aoi_fixation import DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
@@ -339,9 +338,3 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     print(f"Saved {len(fix_df)} rows -> object_aoi_fixations.csv")
 
     return feat_df, trans_df
-
-
-if __name__ == "__main__":
-    with open(ROOT / "configs" / "analysis.yml") as f:
-        cfg = yaml.safe_load(f)
-    run_object_aoi(cfg)

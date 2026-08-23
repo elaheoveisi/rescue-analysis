@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,11 +33,6 @@ def _gte(matrix: pd.DataFrame) -> float | None:
         h_cond = -np.sum(p_cond * np.log2(p_cond + 1e-12), axis=1)
     p_i = row_totals.flatten() / row_totals.sum()
     return float(np.sum(p_i * h_cond))
-
-
-# ---------------------------------------------------------------------------
-# Standalone entry point (reads from saved fixation CSV)
-# ---------------------------------------------------------------------------
 
 
 def build_transition_matrix(labeled: pd.DataFrame, types: list) -> pd.DataFrame:
@@ -82,12 +76,3 @@ def run_entropy(cfg: dict) -> pd.DataFrame:
     ent_df.to_csv(processed / "entropy_features.csv", index=False)
     print(f"Saved {len(ent_df)} rows -> entropy_features.csv")
     return ent_df
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.path.insert(0, str(ROOT / "analysis"))
-    with open(ROOT / "configs" / "analysis.yml") as f:
-        cfg = yaml.safe_load(f)
-    run_entropy(cfg)

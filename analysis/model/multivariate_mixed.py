@@ -1,8 +1,29 @@
 import arviz as az
+import numpy as np
 import pandas as pd
 import pymc as pm
 
-from .glmmsecond import prepare_df as prepare_univariate_df
+
+def prepare_univariate_df(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """Best run per participant/trial, with condition/expertise coded the
+    same way glmm.run_all does (kept in sync with that function)."""
+    condition_map = cfg.get("analysis", {}).get("condition_by_category", {})
+
+    subjects = cfg.get("sub", [])
+    if subjects:
+        df = df[df["participant"].isin(subjects)]
+
+    metric = cfg.get("glmm2", {}).get("best_run_metric", "saved_victims")
+    df = (
+        df.sort_values(metric, ascending=False)
+        .groupby(["participant", "trial"], as_index=False)
+        .first()
+    )
+    df = df.rename(columns={"trial": "category"})
+    df["condition"] = df["category"].map(condition_map).fillna("unknown")
+    df["condition"] = pd.Categorical(df["condition"], categories=["no_llm", "llm"])
+    df["expertise"] = pd.Categorical(df["expertise"], categories=["novice", "expert"])
+    return df
 
 
 def _fixed_effect_rows(idata: az.InferenceData, outcomes: list[str]) -> pd.DataFrame:

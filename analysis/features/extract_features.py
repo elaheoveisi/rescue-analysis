@@ -12,7 +12,7 @@ def load_data_from_h5(cfg: dict) -> dict:
     h5_path = Path(cfg["paths"]["processed"]) / "data.h5"
     data: dict = {}
     with pd.HDFStore(str(h5_path), mode="r") as store:
-        for key in store.keys():
+        for key in store:
             _, sid, trial, run_dir, stream = key.split("/")
             run_num = int(run_dir.replace("run_", ""))
             data.setdefault(sid, {}).setdefault(trial, {}).setdefault(run_num, {})[
