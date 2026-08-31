@@ -1,17 +1,17 @@
 sub:
   - P001
-  # - P002
-  # - P003
-  # - P004
+  - P002
+  - P003
+  - P004
   # # - P005 # Eye features are way off
-  # - P006
-  # - P007
-  # - P008
-  # - P009
-  # - P010
-  # - P011
-  # - P012
-  # - P013
+  - P006
+  - P007
+  - P008
+  - P009
+  - P010
+  - P011
+  - P012
+  - P013
 
 trials: [gemini, openai, dummy]
 # Participant expertise: expert or novice
@@ -46,6 +46,16 @@ analysis:
   outputs:
     fixation_aoi_file: fixations_aoi.csv
     aoi_transitions_file: aoi_transitions.csv
+
+# Shared AOI grouping for SGE/GTE (gaze_entropy.run_entropy_grouped), so both
+# metrics use the same category set. Anything not listed here (empty tiles,
+# walls -> "other"; offscreen) passes through unchanged and is excluded from
+# GTE's transition matrix.
+entropy_groups:
+  Victim: [victim, fake_victim]
+  Hazard: [lava]
+  Access: [door, key]
+  Interface: [info_panel, chat_panel]
 
 xdf:
   game_stream: SARGame

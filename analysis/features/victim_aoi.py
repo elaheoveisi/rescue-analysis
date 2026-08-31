@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from features.aoi_fixation import DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
 from features.aoi_fixation import label_fixations
 from features.eye_tracking_features import run_eyetracking
-from features.gaze_entropy import _gte, _sge, build_transition_matrix
+from features.gaze_entropy import _gte, _sge, build_transition_matrix, regroup_obj_type
 from features.grid import best_runs, cam_bounds, extract_run_grid
 from prepare_data.parse import get_stream, xdf_path
 
@@ -194,7 +194,8 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     obj_types = _object_types(tile_aois)  # e.g. (fake_victim, victim, lava, door, key)
     panel_names = [a["name"] for a in panel_aois]
     trans_types = list(obj_types) + panel_names + ["other"]
-    gte_types = ["victim"] + panel_names
+    entropy_groups = cfg.get("entropy_groups", {})
+    entropy_types = list(entropy_groups.keys())
     trials_cfg = [str(t) for t in cfg.get("trials", [])]
 
     feat_rows, trans_rows, fix_rows = [], [], []
@@ -258,28 +259,24 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 )
 
                 matrix = build_transition_matrix(labeled, trans_types)
-                gte_matrix = build_transition_matrix(labeled, gte_types)
 
-                feat_rows.append(
-                    {
-                        **meta,
-                        "n_fixations_total": len(fix_df),
-                        **{
-                            k: v
-                            for t in obj_types
-                            for k, v in _type_features(labeled, total_dur, t).items()
-                        },
-                        **{
-                            k: v
-                            for p in panel_aois
-                            for k, v in _panel_features(
-                                labeled, total_dur, p["name"]
-                            ).items()
-                        },
-                        "sge": _sge(labeled),
-                        "gte": _gte(gte_matrix),
-                    }
+                # SGE/GTE: regroup to the configured entropy categories (same AOIs
+                # for both metrics) and drop anything outside those groups.
+                entropy_labeled = labeled.copy()
+                entropy_labeled["obj_type"] = entropy_labeled["obj_type"].apply(
+                    lambda t: regroup_obj_type(t, entropy_groups)
                 )
+                entropy_labeled = entropy_labeled[entropy_labeled["obj_type"].isin(entropy_types)]
+                gte_matrix = build_transition_matrix(entropy_labeled, entropy_types)
+
+                feat_rows.append({
+                    **meta,
+                    "n_fixations_total": len(fix_df),
+                    **{k: v for t in obj_types for k, v in _type_features(labeled, total_dur, t).items()},
+                    **{k: v for p in panel_aois for k, v in _panel_features(labeled, total_dur, p["name"]).items()},
+                    "sge": _sge(entropy_labeled),
+                    "gte": _gte(gte_matrix),
+                })
 
                 grid_dir = ROOT / cfg["paths"]["processed"] / "grids"
                 grid_dir.mkdir(exist_ok=True)
