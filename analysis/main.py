@@ -5,6 +5,7 @@ import yaml
 from features.extract_features import extract_features
 from features.vs_mot_kmeans import run_vs_mot_kmeans
 from model.glmm import run_all as run_glmmsecond
+from model.help_vs_auto import run as run_help_vs_auto
 from model.power_analysis import run as run_power_analysis
 from prepare_data.data import split_all_data_by_trial
 from utils import skip_run
@@ -41,3 +42,6 @@ with skip_run("skip", "mixed_effect_model") as check, check():
 
 with skip_run("skip", "power_analysis") as check, check():
     run_power_analysis(cfg)
+
+with skip_run("skip", "help_vs_auto_classification") as check, check():
+    run_help_vs_auto(cfg)

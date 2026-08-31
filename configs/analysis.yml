@@ -56,6 +56,42 @@ entropy_groups:
   Access: [door, key]
   Interface: [info_panel, chat_panel]
 
+# Alt-press (manual help) vs automatic (every-50-step) LLM recommendation
+# classification. See analysis/model/help_vs_auto.py.
+help_vs_auto:
+  exclude_participants: [ P005, P013 ]
+  llm_trials: [ gemini, openai ] # dummy has no LLM, so no automatic events -- gemini and openai are pooled, not modeled separately
+  auto_interval_steps: 50 # game steps between automatic LLM recommendations
+  windows_s: [ 5, 10, 15, 20 ] # seconds of look-back before each event
+  min_fixations: 2 # below this, SGE/GTE for that window are left null
+  n_balance_repeats: 10 # repeats of majority-class downsampling, averaged
+  random_state: 42
+  # Random Forest hyperparameters (sklearn.ensemble.RandomForestClassifier).
+  # rf_n_estimators/rf_importance_n_estimators are separate because the
+  # importance fit is a single fit (not averaged over LOSO folds), so it uses
+  # more trees for a more stable ranking.
+  rf_n_estimators: 300 # trees per LOSO fold fit (run_classifiers)
+  rf_importance_n_estimators: 500 # trees for the single fit used in permutation importance
+  rf_max_depth: 3
+  rf_min_samples_leaf: 10
+  events_file: help_vs_auto_events.csv
+  features_file: help_vs_auto_features.csv
+  results_file: help_vs_auto_classifier_results.csv
+  importance_file: help_vs_auto_feature_importance.csv
+  # Eyes/pupil/gaze features only. "time_since_last_event_s" is deliberately
+  # excluded: it tracks the automatic trigger's fixed 50-step cadence almost
+  # exactly, so it would predict the game's clock rather than reflect any real
+  # gaze/pupil signal.
+  features:
+    [
+      sge, gte,
+      fixation_rate_hz, mean_fixation_dur_ms, fixation_dwell_fraction,
+      saccade_rate_hz, mean_saccade_dur_ms, mean_saccade_amp_px,
+      std_pupil_diam, mean_pupil_diameter, pupil_slope_per_s,
+      victim_dwell_fraction, hazard_dwell_fraction, access_dwell_fraction, interface_dwell_fraction,
+      gaze_dispersion_px, aoi_transition_rate_hz, valid_gaze_fraction,
+    ]
+
 xdf:
   game_stream: SARGame
   eye_stream: TobiiEyeTracker
