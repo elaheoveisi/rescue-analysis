@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import json
@@ -9,13 +7,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyxdf
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from features.aoi_fixation import label_fixations, DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
+from features.aoi_fixation import DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
+from features.aoi_fixation import label_fixations
 from features.eye_tracking_features import run_eyetracking
-from features.gaze_entropy import _sge, _gte, build_transition_matrix, regroup_obj_type
-from features.grid import cam_bounds, extract_run_grid, best_runs
+from features.gaze_entropy import _gte, _sge, build_transition_matrix, regroup_obj_type
+from features.grid import best_runs, cam_bounds, extract_run_grid
 from prepare_data.parse import get_stream, xdf_path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # ---------------------------------------------------------------------------
 # Config-driven tile → AOI label
 # ---------------------------------------------------------------------------
+
 
 def _build_tile_labeler(tile_aois: list[dict]):
 
@@ -34,7 +33,9 @@ def _build_tile_labeler(tile_aois: list[dict]):
         if "tile_id" in a:
             exact[int(a["tile_id"])] = (a["name"], positional)
         elif "tile_id_min" in a:
-            ranges.append((int(a["tile_id_min"]), int(a["tile_id_max"]), a["name"], positional))
+            ranges.append(
+                (int(a["tile_id_min"]), int(a["tile_id_max"]), a["name"], positional)
+            )
 
     def _label(tile: int, gx: int, gy: int) -> str:
         if tile in exact:
@@ -55,6 +56,7 @@ def _object_types(tile_aois: list[dict]) -> tuple[str, ...]:
 
 def _make_aoi_to_type(panel_names: frozenset, object_types: tuple[str, ...]):
     """Return a function mapping an AOI label to its object-type string."""
+
     def _fn(aoi: str) -> str:
         for t in object_types:
             if aoi.startswith(t + "_"):
@@ -62,12 +64,14 @@ def _make_aoi_to_type(panel_names: frozenset, object_types: tuple[str, ...]):
         if aoi in panel_names:
             return aoi
         return "offscreen" if aoi == "offscreen" else "other"
+
     return _fn
 
 
 # ---------------------------------------------------------------------------
 # Dynamic per-fixation labeling
 # ---------------------------------------------------------------------------
+
 
 def label_fixations_dynamic(
     fix_df: pd.DataFrame,
@@ -143,6 +147,7 @@ def label_fixations_dynamic(
 # Feature computation
 # ---------------------------------------------------------------------------
 
+
 def _fixation_stats(on: pd.DataFrame, total_dur: float, prefix: str) -> dict:
     dur = float(on["duration_ms"].sum()) if not on.empty else 0.0
     return {
@@ -168,6 +173,7 @@ def _type_features(labeled: pd.DataFrame, total_dur: float, t: str) -> dict:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run dynamic object AOI analysis for all subjects / trials / runs.
 
@@ -184,8 +190,8 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
         next(a for a in cfg["aoi"] if a["name"] == "game_area"),
     )
     panel_aois = [a for a in cfg["aoi"] if a.get("type", "static") == "static"]
-    tile_aois  = [a for a in cfg["aoi"] if a.get("type") == "tile"]
-    obj_types  = _object_types(tile_aois)   # e.g. (fake_victim, victim, lava, door, key)
+    tile_aois = [a for a in cfg["aoi"] if a.get("type") == "tile"]
+    obj_types = _object_types(tile_aois)  # e.g. (fake_victim, victim, lava, door, key)
     panel_names = [a["name"] for a in panel_aois]
     trans_types = list(obj_types) + panel_names + ["other"]
     entropy_groups = cfg.get("entropy_groups", {})
@@ -209,7 +215,11 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 print(f"  No game stream for {sid}, skipping")
                 continue
 
-            for eye_key in [k for k in store.keys() if f"/{sid}/" in k and k.endswith("/eye_tracking")]:
+            for eye_key in [
+                k
+                for k in store.keys()
+                if f"/{sid}/" in k and k.endswith("/eye_tracking")
+            ]:
                 game_key = eye_key.replace("/eye_tracking", "/game")
                 if game_key not in store:
                     continue
@@ -234,10 +244,18 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 fix_df = run_eyetracking(eye_df, cfg)["fixations"]
 
                 meta = {"subject": sid, "trial": trial_match, "run": run_num}
-                total_dur = float(fix_df["duration_ms"].sum()) if not fix_df.empty else 0.0
+                total_dur = (
+                    float(fix_df["duration_ms"].sum()) if not fix_df.empty else 0.0
+                )
 
                 labeled = label_fixations_dynamic(
-                    fix_df, game_df, eye_df, grid_info["grid"], game_aoi, panel_aois, tile_aois
+                    fix_df,
+                    game_df,
+                    eye_df,
+                    grid_info["grid"],
+                    game_aoi,
+                    panel_aois,
+                    tile_aois,
                 )
 
                 matrix = build_transition_matrix(labeled, trans_types)
@@ -270,15 +288,37 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 )
 
                 if not labeled.empty:
-                    lf = labeled[["start_ms", "end_ms", "duration_ms", "x", "y", "grid_x", "grid_y", "tile_pixel_x_min", "tile_pixel_x_max", "tile_pixel_y_min", "tile_pixel_y_max", "aoi", "obj_type"]].copy()
+                    lf = labeled[
+                        [
+                            "start_ms",
+                            "end_ms",
+                            "duration_ms",
+                            "x",
+                            "y",
+                            "grid_x",
+                            "grid_y",
+                            "tile_pixel_x_min",
+                            "tile_pixel_x_max",
+                            "tile_pixel_y_min",
+                            "tile_pixel_y_max",
+                            "aoi",
+                            "obj_type",
+                        ]
+                    ].copy()
                     for k, v in meta.items():
                         lf[k] = v
                     fix_rows.append(lf)
-                trans_rows.append({
-                    **meta,
-                    "n_fixations_total": len(fix_df),
-                    **{f"trans_{s}_to_{d}": int(matrix.loc[s, d]) for s in trans_types for d in trans_types},
-                })
+                trans_rows.append(
+                    {
+                        **meta,
+                        "n_fixations_total": len(fix_df),
+                        **{
+                            f"trans_{s}_to_{d}": int(matrix.loc[s, d])
+                            for s in trans_types
+                            for d in trans_types
+                        },
+                    }
+                )
 
     processed = ROOT / cfg["paths"]["processed"]
 
@@ -295,9 +335,3 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     print(f"Saved {len(fix_df)} rows -> object_aoi_fixations.csv")
 
     return feat_df, trans_df
-
-
-if __name__ == "__main__":
-    with open(ROOT / "configs" / "analysis.yml") as f:
-        cfg = yaml.safe_load(f)
-    run_object_aoi(cfg)

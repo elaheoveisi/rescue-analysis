@@ -1,12 +1,9 @@
-
-
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -14,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # ---------------------------------------------------------------------------
 # Core metrics
 # ---------------------------------------------------------------------------
+
 
 def _sge(labeled: pd.DataFrame) -> float | None:
     """Stationary Gaze Entropy over obj_type, excluding offscreen fixations."""
@@ -51,10 +49,6 @@ def _gte(matrix: pd.DataFrame) -> float | None:
     return float(np.sum(p_i * h_cond))
 
 
-# ---------------------------------------------------------------------------
-# Standalone entry point (reads from saved fixation CSV)
-# ---------------------------------------------------------------------------
-
 def build_transition_matrix(labeled: pd.DataFrame, types: list) -> pd.DataFrame:
     """Build a transition count matrix over obj_type for the given type labels."""
     matrix = pd.DataFrame(0, index=types, columns=types)
@@ -82,13 +76,15 @@ def run_entropy(cfg: dict) -> pd.DataFrame:
         group = group.sort_values("start_ms")
         gte_matrix = build_transition_matrix(group, gte_types)
 
-        rows.append({
-            "subject": sid,
-            "trial": trial,
-            "run": run,
-            "sge": _sge(group),
-            "gte": _gte(gte_matrix),
-        })
+        rows.append(
+            {
+                "subject": sid,
+                "trial": trial,
+                "run": run,
+                "sge": _sge(group),
+                "gte": _gte(gte_matrix),
+            }
+        )
 
     ent_df = pd.DataFrame(rows)
     ent_df.to_csv(processed / "entropy_features.csv", index=False)
