@@ -1,40 +1,23 @@
-"""Classify manual Alt-press-for-help (label=1) vs automatic step-interval LLM
-recommendation (label=0) events from pre-event eye-tracking/gaze/pupil features.
 
-Event timeline and feature extraction live in
-features/help_vs_auto_features.py -- this module only fits and evaluates
-GLMM + Random Forest classifiers on the resulting per-event, per-window features.
-
-Each model is evaluated by leave-one-participant-out cross-validation (train on
-all but one participant, test on the held-out one) so reported performance
-reflects generalization to a new person, not memorization. Classes are balanced
-by downsampling the majority class before each fit -- averaged over
-`n_balance_repeats` random draws, since a single draw is noisy at this sample size.
-"""
 
 from __future__ import annotations
 
-import sys
 import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
 from statsmodels.genmod.bayes_mixed_glm import BinomialBayesMixedGLM
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "analysis"))
 
 from features.help_vs_auto_features import build_events, build_features
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
-def _balanced_sample(df: pd.DataFrame, seed: int) -> pd.DataFrame:
+def balanced_sample(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     n_min = df["label"].value_counts().min()
     rng = np.random.RandomState(seed)
     return pd.concat(
@@ -43,7 +26,7 @@ def _balanced_sample(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     )
 
 
-def _loso_glmm(bal: pd.DataFrame, zcols: list[str]) -> tuple[list, list]:
+def loso_glmm(bal: pd.DataFrame, zcols: list[str]) -> tuple[list, list]:
     formula = "label ~ " + " + ".join(zcols)
     y_true, y_pred = [], []
     for s in bal["subject_c"].unique():
@@ -62,7 +45,7 @@ def _loso_glmm(bal: pd.DataFrame, zcols: list[str]) -> tuple[list, list]:
     return y_true, y_pred
 
 
-def _loso_sklearn(bal: pd.DataFrame, zcols: list[str], make_model) -> tuple[list, list]:
+def loso_sklearn(bal: pd.DataFrame, zcols: list[str], make_model) -> tuple[list, list]:
     y_true, y_pred = [], []
     for s in bal["subject_c"].unique():
         train, test = bal[bal["subject_c"] != s], bal[bal["subject_c"] == s]
@@ -76,14 +59,14 @@ def _loso_sklearn(bal: pd.DataFrame, zcols: list[str], make_model) -> tuple[list
     return y_true, y_pred
 
 
-def _score(y_true: list, y_pred: list, threshold: float) -> tuple[float | None, float | None]:
+def score(y_true: list, y_pred: list, threshold: float) -> tuple[float | None, float | None]:
     if len(set(y_true)) < 2:
         return None, None
     pred = (np.array(y_pred) > threshold).astype(int)
     return roc_auc_score(y_true, y_pred), accuracy_score(y_true, pred)
 
 
-def _make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
+def make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
     return RandomForestClassifier(
         n_estimators=hva_cfg.get(n_estimators_key, 300),
         max_depth=hva_cfg.get("rf_max_depth", 4),
@@ -92,7 +75,7 @@ def _make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
     )
 
 
-def _prep_window(df: pd.DataFrame, w, features: list[str]) -> tuple[pd.DataFrame, list[str]]:
+def prep_window(df: pd.DataFrame, w, features: list[str]) -> tuple[pd.DataFrame, list[str]]:
     """One window's rows, globally z-scored per feature, with a categorical
     subject column for grouping -- shared prep step for run_classifiers,
     feature_importance, and confusion_matrices."""
@@ -116,17 +99,17 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
 
     results = []
     for w in sorted(df["window"].unique()):
-        base, zcols = _prep_window(df, w, features)
+        base, zcols = prep_window(df, w, features)
         if base.empty:
             continue
 
         scores = {"glmm": [], "rf": []}
         for r in range(n_repeats):
-            bal = _balanced_sample(base, seed0 + r)
+            bal = balanced_sample(base, seed0 + r)
 
-            scores["glmm"].append(_score(*_loso_glmm(bal, zcols), threshold))
-            scores["rf"].append(_score(*_loso_sklearn(
-                bal, zcols, lambda: _make_rf(hva_cfg, "rf_n_estimators"),
+            scores["glmm"].append(score(*loso_glmm(bal, zcols), threshold))
+            scores["rf"].append(score(*loso_sklearn(
+                bal, zcols, lambda: make_rf(hva_cfg, "rf_n_estimators"),
             ), threshold))
 
         row = {"window_s": w, "n_per_class": base["label"].value_counts().min()}
@@ -154,19 +137,19 @@ def confusion_matrices(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     for w in sorted(df["window"].unique()):
-        base, zcols = _prep_window(df, w, features)
+        base, zcols = prep_window(df, w, features)
         if base.empty:
             continue
 
         cms = {"glmm": np.zeros((2, 2), dtype=int), "rf": np.zeros((2, 2), dtype=int)}
         for r in range(n_repeats):
-            bal = _balanced_sample(base, seed0 + r)
+            bal = balanced_sample(base, seed0 + r)
 
-            yt, yp = _loso_glmm(bal, zcols)
+            yt, yp = loso_glmm(bal, zcols)
             pred = (np.array(yp) > threshold).astype(int)
             cms["glmm"] += confusion_matrix(yt, pred, labels=[0, 1])
 
-            yt, yp = _loso_sklearn(bal, zcols, lambda: _make_rf(hva_cfg, "rf_n_estimators"))
+            yt, yp = loso_sklearn(bal, zcols, lambda: make_rf(hva_cfg, "rf_n_estimators"))
             pred = (np.array(yp) > threshold).astype(int)
             cms["rf"] += confusion_matrix(yt, pred, labels=[0, 1])
 
@@ -196,9 +179,9 @@ def feature_importance(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
         sub = df[df["window"] == w].dropna(subset=features).copy()
         if sub.empty:
             continue
-        bal = _balanced_sample(sub, seed0)
+        bal = balanced_sample(sub, seed0)
         X, y = bal[features], bal["label"]
-        rf = _make_rf(hva_cfg, "rf_importance_n_estimators")
+        rf = make_rf(hva_cfg, "rf_importance_n_estimators")
         rf.fit(X, y)
         perm = permutation_importance(rf, X, y, n_repeats=20, random_state=0, scoring="roc_auc")
         rows.append(pd.DataFrame({
@@ -210,7 +193,7 @@ def feature_importance(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
 
 
 def run(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    processed = ROOT / cfg["paths"]["processed"]
+    processed = Path(cfg["paths"]["processed"])
     hva_cfg = cfg["help_vs_auto"]
 
     events_df = build_events(cfg)
@@ -241,9 +224,3 @@ def run(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
     print(f"Saved -> {cm_out}")
 
     return events_df, features_df, results, importance, cm
-
-
-if __name__ == "__main__":
-    with open(ROOT / "configs" / "analysis.yml") as f:
-        cfg = yaml.safe_load(f)
-    run(cfg)

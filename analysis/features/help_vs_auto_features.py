@@ -1,20 +1,16 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "analysis"))
-
 from features.eye_tracking_features import build_eye_features
 from features.gaze_entropy import build_transition_matrix, gte as compute_gte, regroup_obj_type, sge as compute_sge
 
 
-def _window_slice(df: pd.DataFrame, ts_col: str, lo: float, hi: float) -> pd.DataFrame:
+def window_slice(df: pd.DataFrame, ts_col: str, lo: float, hi: float) -> pd.DataFrame:
     """Rows of df whose ts_col falls in [lo, hi)."""
     return df[(df[ts_col] >= lo) & (df[ts_col] < hi)]
 
@@ -23,7 +19,7 @@ def _window_slice(df: pd.DataFrame, ts_col: str, lo: float, hi: float) -> pd.Dat
 # 1. Event timeline
 # ---------------------------------------------------------------------------
 
-def _first_timestamp_per_step(game: pd.DataFrame, mask: pd.Series) -> pd.Series:
+def first_timestamp_per_step(game: pd.DataFrame, mask: pd.Series) -> pd.Series:
     """One timestamp per step_count among the rows where `mask` is True.
 
     The game log has one row per eye-tracker sample, not one row per game step,
@@ -33,7 +29,7 @@ def _first_timestamp_per_step(game: pd.DataFrame, mask: pd.Series) -> pd.Series:
     return game.loc[mask].dropna(subset=["step_count"]).groupby("step_count")["timestamp"].min()
 
 
-def _event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFrame:
+def event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFrame:
     """One row per event (step, label, timestamp), chronological.
 
     label: 1 = manual alt-press, 0 = automatic recommendation every
@@ -43,14 +39,14 @@ def _event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFram
     game["timestamp"] = pd.to_numeric(game["timestamp"], errors="coerce")
     game["step_count"] = pd.to_numeric(game["step_count"], errors="coerce")
 
-    manual_steps = _first_timestamp_per_step(game, game["alt_pressed"] == True)
+    manual_steps = first_timestamp_per_step(game, game["alt_pressed"] == True)
 
     max_step = game["step_count"].max()
     auto_candidates = np.arange(
         auto_interval_steps, (max_step // auto_interval_steps + 1) * auto_interval_steps, auto_interval_steps
     )
     auto_mask = game["step_count"].isin(auto_candidates) & ~game["step_count"].isin(manual_steps.index)
-    auto_steps = _first_timestamp_per_step(game, auto_mask)
+    auto_steps = first_timestamp_per_step(game, auto_mask)
 
     events = pd.DataFrame(
         [{"step": int(s), "timestamp": t, "label": 1} for s, t in manual_steps.items()]
@@ -72,7 +68,7 @@ def build_events(cfg: dict) -> pd.DataFrame:
     groups = cfg["entropy_groups"]
     gte_types = list(groups.keys())
 
-    processed = ROOT / cfg["paths"]["processed"]
+    processed = Path(cfg["paths"]["processed"])
     fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
     fix_all["obj_type_grouped"] = fix_all["obj_type"].apply(lambda t: regroup_obj_type(t, groups))
 
@@ -98,12 +94,12 @@ def build_events(cfg: dict) -> pd.DataFrame:
             eye = store[ek]
             eye_min = pd.to_numeric(eye["timestamp"], errors="coerce").min()
 
-            events = _event_timeline(game, auto_interval_steps)
+            events = event_timeline(game, auto_interval_steps)
             for _, ev in events.iterrows():
                 event_rel_ms = (ev["timestamp"] - eye_min) * 1000.0
                 for w in windows:
                     lo = event_rel_ms - w * 1000.0
-                    sub_fix_win = _window_slice(sub_fix, "start_ms", lo, event_rel_ms)
+                    sub_fix_win = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
                     win_fix = sub_fix_win[sub_fix_win["obj_type_grouped"].isin(gte_types)]
                     n_fix = len(win_fix)
                     if n_fix >= min_fix:
@@ -292,7 +288,7 @@ def recent_dwell_fractions(wf: pd.DataFrame, group_names: list[str], lo: float, 
 # 3. Per-window feature assembly
 # ---------------------------------------------------------------------------
 
-def _window_features(
+def window_features(
     cfg: dict, wf: pd.DataFrame, ws: pd.DataFrame, we: pd.DataFrame, lo: float, w: int, group_names: list[str]
 ) -> dict:
     
@@ -334,7 +330,7 @@ def _window_features(
 
 
 def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
-    processed = ROOT / cfg["paths"]["processed"]
+    processed = Path(cfg["paths"]["processed"])
     groups = cfg["entropy_groups"]
     group_names = list(groups.keys())
     fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
@@ -376,14 +372,14 @@ def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
                 event_rel_ms = (ts - eye_min) * 1000.0
                 lo = event_rel_ms - w * 1000.0
 
-                wf = _window_slice(sub_fix, "start_ms", lo, event_rel_ms)
-                ws = _window_slice(sacc, "start_ms", lo, event_rel_ms)
-                we = _window_slice(eye, "rel_ms", lo, event_rel_ms)
+                wf = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
+                ws = window_slice(sacc, "start_ms", lo, event_rel_ms)
+                we = window_slice(eye, "rel_ms", lo, event_rel_ms)
 
                 rows.append({
                     "subject": sid, "trial": trial, "run": run_num,
                     "step": int(step), "label": int(label), "window": w,
-                    **_window_features(cfg, wf, ws, we, lo, w, group_names),
+                    **window_features(cfg, wf, ws, we, lo, w, group_names),
                 })
 
     return pd.DataFrame(rows)
