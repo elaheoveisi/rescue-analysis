@@ -5,15 +5,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[2]
-
-
 # ---------------------------------------------------------------------------
 # Core metrics
 # ---------------------------------------------------------------------------
 
 
-def _sge(labeled: pd.DataFrame) -> float | None:
+def sge(labeled: pd.DataFrame) -> float | None:
     """Stationary Gaze Entropy over obj_type, excluding offscreen fixations."""
     on = labeled[labeled["obj_type"] != "offscreen"]["obj_type"]
     if on.empty:
@@ -22,7 +19,7 @@ def _sge(labeled: pd.DataFrame) -> float | None:
     return float(-np.sum(p * np.log2(p + 1e-12)))
 
 
-def _dte(labeled: pd.DataFrame) -> float | None:
+def dte(labeled: pd.DataFrame) -> float | None:
     """Dwell-Time Entropy over obj_type: same formula as SGE, but weighted by
     summed fixation duration instead of fixation count. Excludes offscreen."""
     on = labeled[labeled["obj_type"] != "offscreen"]
@@ -36,7 +33,7 @@ def _dte(labeled: pd.DataFrame) -> float | None:
     return float(-np.sum(p * np.log2(p + 1e-12)))
 
 
-def _gte(matrix: pd.DataFrame) -> float | None:
+def gte(matrix: pd.DataFrame) -> float | None:
     """Gaze Transition Entropy from a raw-count transition matrix."""
     counts = matrix.values.astype(float)
     row_totals = counts.sum(axis=1, keepdims=True)
@@ -63,9 +60,9 @@ def run_entropy(cfg: dict) -> pd.DataFrame:
 
     Requires victim_aoi.run_object_aoi to have been run first.
     """
-    # Deferred import — victim_aoi imports _sge/_gte from this module at module level,
+    # Deferred import — victim_aoi imports sge/gte from this module at module level,
     # so importing victim_aoi here would be circular if done at module level.
-    processed = ROOT / cfg["paths"]["processed"]
+    processed = Path(cfg["paths"]["processed"])
     fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
 
     panel_names = [a["name"] for a in cfg["aoi"] if a.get("type", "static") == "static"]
@@ -81,8 +78,8 @@ def run_entropy(cfg: dict) -> pd.DataFrame:
                 "subject": sid,
                 "trial": trial,
                 "run": run,
-                "sge": _sge(group),
-                "gte": _gte(gte_matrix),
+                "sge": sge(group),
+                "gte": gte(gte_matrix),
             }
         )
 
@@ -116,7 +113,7 @@ def run_entropy_grouped(cfg: dict) -> pd.DataFrame:
 
     Requires victim_aoi.run_object_aoi to have been run first.
     """
-    processed = ROOT / cfg["paths"]["processed"]
+    processed = Path(cfg["paths"]["processed"])
     fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
     groups = cfg.get("entropy_groups", {})
     gte_types = list(groups.keys())
@@ -133,8 +130,8 @@ def run_entropy_grouped(cfg: dict) -> pd.DataFrame:
             "subject": sid,
             "trial": trial,
             "run": run,
-            "sge": _sge(group),
-            "gte": _gte(gte_matrix),
+            "sge": sge(group),
+            "gte": gte(gte_matrix),
         })
 
     ent_df = pd.DataFrame(rows)
@@ -142,12 +139,3 @@ def run_entropy_grouped(cfg: dict) -> pd.DataFrame:
     ent_df.to_csv(out, index=False)
     print(f"Saved {len(ent_df)} rows -> {out}")
     return ent_df
-
-
-if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, str(ROOT / "analysis"))
-    with open(ROOT / "configs" / "analysis.yml") as f:
-        cfg = yaml.safe_load(f)
-    run_entropy(cfg)
-    run_entropy_grouped(cfg)

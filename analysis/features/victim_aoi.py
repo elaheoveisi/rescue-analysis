@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from features.aoi_fixation import DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
 from features.aoi_fixation import label_fixations
 from features.eye_tracking_features import run_eyetracking
-from features.gaze_entropy import _gte, _sge, build_transition_matrix, regroup_obj_type
+from features.gaze_entropy import build_transition_matrix, gte, regroup_obj_type, sge
 from features.grid import best_runs, cam_bounds, extract_run_grid
 from prepare_data.parse import get_stream, xdf_path
 
@@ -274,8 +274,8 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                     "n_fixations_total": len(fix_df),
                     **{k: v for t in obj_types for k, v in _type_features(labeled, total_dur, t).items()},
                     **{k: v for p in panel_aois for k, v in _panel_features(labeled, total_dur, p["name"]).items()},
-                    "sge": _sge(entropy_labeled),
-                    "gte": _gte(gte_matrix),
+                    "sge": sge(entropy_labeled),
+                    "gte": gte(gte_matrix),
                 })
 
                 grid_dir = ROOT / cfg["paths"]["processed"] / "grids"
