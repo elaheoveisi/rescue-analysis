@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
 from statsmodels.genmod.bayes_mixed_glm import BinomialBayesMixedGLM
-
 from features.help_vs_auto_features import build_events, build_features
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -26,17 +24,17 @@ def balanced_sample(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     )
 
 
-def loso_glmm(bal: pd.DataFrame, zcols: list[str]) -> tuple[list, list]:
-    formula = "label ~ " + " + ".join(zcols)
+def loso_glmm(balanced_df: pd.DataFrame, fixed_effect_cols: list[str]) -> tuple[list, list]:
+    formula = "label ~ " + " + ".join(fixed_effect_cols)
     y_true, y_pred = [], []
-    for s in bal["subject_c"].unique():
-        train, test = bal[bal["subject_c"] != s], bal[bal["subject_c"] == s]
+    for s in balanced_df["subject_cat"].unique():
+        train, test = balanced_df[balanced_df["subject_cat"] != s], balanced_df[balanced_df["subject_cat"] == s]
         if train["label"].nunique() < 2 or test.empty:
             continue
         try:
-            model = BinomialBayesMixedGLM.from_formula(formula, {"subject": "0 + C(subject_c)"}, train)
+            model = BinomialBayesMixedGLM.from_formula(formula, {"subject": "0 + C(subject_cat)"}, train)
             fit = model.fit_vb()
-            test_exog = np.column_stack([np.ones(len(test))] + [test[c].to_numpy() for c in zcols])
+            test_exog = np.column_stack([np.ones(len(test))] + [test[c].to_numpy() for c in fixed_effect_cols])
             p = fit.predict(exog=test_exog)
             y_true.extend(test["label"].tolist())
             y_pred.extend(np.atleast_1d(p).tolist())
@@ -45,15 +43,15 @@ def loso_glmm(bal: pd.DataFrame, zcols: list[str]) -> tuple[list, list]:
     return y_true, y_pred
 
 
-def loso_sklearn(bal: pd.DataFrame, zcols: list[str], make_model) -> tuple[list, list]:
+def loso_sklearn(balanced_df: pd.DataFrame, fixed_effect_cols: list[str], make_model) -> tuple[list, list]:
     y_true, y_pred = [], []
-    for s in bal["subject_c"].unique():
-        train, test = bal[bal["subject_c"] != s], bal[bal["subject_c"] == s]
+    for s in balanced_df["subject_cat"].unique():
+        train, test = balanced_df[balanced_df["subject_cat"] != s], balanced_df[balanced_df["subject_cat"] == s]
         if train["label"].nunique() < 2 or test.empty:
             continue
         model = make_model()
-        model.fit(train[zcols], train["label"])
-        p = model.predict_proba(test[zcols])[:, 1]
+        model.fit(train[fixed_effect_cols], train["label"])
+        p = model.predict_proba(test[fixed_effect_cols])[:, 1]
         y_true.extend(test["label"].tolist())
         y_pred.extend(p.tolist())
     return y_true, y_pred
@@ -71,7 +69,7 @@ def make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
         n_estimators=hva_cfg.get(n_estimators_key, 300),
         max_depth=hva_cfg.get("rf_max_depth", 4),
         min_samples_leaf=hva_cfg.get("rf_min_samples_leaf", 5),
-        random_state=0,
+        random_state=hva_cfg.get("rf_random_state", 0),
     )
 
 
@@ -82,12 +80,12 @@ def prep_window(df: pd.DataFrame, w, features: list[str]) -> tuple[pd.DataFrame,
     base = df[df["window"] == w].dropna(subset=features).copy()
     if base.empty:
         return base, []
-    base["subject_c"] = base["subject"].astype("category")
-    zcols = [f + "_z" for f in features]
-    for f, z in zip(features, zcols):
+    base["subject_cat"] = base["subject"].astype("category")  # subject_cat definition (random intercept)
+    fixed_effect_cols = [f + "_z" for f in features]  # fixed_effect_cols definition (fixed effect)
+    for f, z in zip(features, fixed_effect_cols):
         sd = base[f].std()
         base[z] = (base[f] - base[f].mean()) / sd if sd > 0 else 0.0
-    return base, zcols
+    return base, fixed_effect_cols
 
 
 def run_classifiers(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
@@ -99,17 +97,17 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
 
     results = []
     for w in sorted(df["window"].unique()):
-        base, zcols = prep_window(df, w, features)
+        base, fixed_effect_cols = prep_window(df, w, features)
         if base.empty:
             continue
 
         scores = {"glmm": [], "rf": []}
         for r in range(n_repeats):
-            bal = balanced_sample(base, seed0 + r)
+            balanced_df = balanced_sample(base, seed0 + r)
 
-            scores["glmm"].append(score(*loso_glmm(bal, zcols), threshold))
+            scores["glmm"].append(score(*loso_glmm(balanced_df, fixed_effect_cols), threshold))
             scores["rf"].append(score(*loso_sklearn(
-                bal, zcols, lambda: make_rf(hva_cfg, "rf_n_estimators"),
+                balanced_df, fixed_effect_cols, lambda: make_rf(hva_cfg, "rf_n_estimators"),
             ), threshold))
 
         row = {"window_s": w, "n_per_class": base["label"].value_counts().min()}
@@ -137,19 +135,19 @@ def confusion_matrices(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     for w in sorted(df["window"].unique()):
-        base, zcols = prep_window(df, w, features)
+        base, fixed_effect_cols = prep_window(df, w, features)
         if base.empty:
             continue
 
         cms = {"glmm": np.zeros((2, 2), dtype=int), "rf": np.zeros((2, 2), dtype=int)}
         for r in range(n_repeats):
-            bal = balanced_sample(base, seed0 + r)
+            balanced_df = balanced_sample(base, seed0 + r)
 
-            yt, yp = loso_glmm(bal, zcols)
+            yt, yp = loso_glmm(balanced_df, fixed_effect_cols)
             pred = (np.array(yp) > threshold).astype(int)
             cms["glmm"] += confusion_matrix(yt, pred, labels=[0, 1])
 
-            yt, yp = loso_sklearn(bal, zcols, lambda: make_rf(hva_cfg, "rf_n_estimators"))
+            yt, yp = loso_sklearn(balanced_df, fixed_effect_cols, lambda: make_rf(hva_cfg, "rf_n_estimators"))
             pred = (np.array(yp) > threshold).astype(int)
             cms["rf"] += confusion_matrix(yt, pred, labels=[0, 1])
 
@@ -179,11 +177,16 @@ def feature_importance(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
         sub = df[df["window"] == w].dropna(subset=features).copy()
         if sub.empty:
             continue
-        bal = balanced_sample(sub, seed0)
-        X, y = bal[features], bal["label"]
+        balanced_df = balanced_sample(sub, seed0)
+        X, y = balanced_df[features], balanced_df["label"]
         rf = make_rf(hva_cfg, "rf_importance_n_estimators")
         rf.fit(X, y)
-        perm = permutation_importance(rf, X, y, n_repeats=20, random_state=0, scoring="roc_auc")
+        perm = permutation_importance(
+            rf, X, y,
+            n_repeats=hva_cfg.get("perm_importance_n_repeats", 20),
+            random_state=hva_cfg.get("perm_importance_random_state", 0),
+            scoring="roc_auc",
+        )
         rows.append(pd.DataFrame({
             "window_s": w, "feature": features,
             "perm_importance_mean": perm.importances_mean,

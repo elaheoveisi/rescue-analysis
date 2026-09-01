@@ -76,6 +76,9 @@ help_vs_auto:
   rf_importance_n_estimators: 500 # trees for the single fit used in permutation importance
   rf_max_depth: 3
   rf_min_samples_leaf: 10
+  rf_random_state: 0
+  perm_importance_n_repeats: 20 # shuffles per feature in feature_importance's permutation_importance
+  perm_importance_random_state: 0
   classification_threshold: 0.5 # predicted-probability cutoff for label=1 (Alt) in _score and confusion_matrices
   events_file: help_vs_auto_events.csv
   features_file: help_vs_auto_features.csv
