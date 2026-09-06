@@ -89,7 +89,7 @@ def build_events(cfg: dict) -> pd.DataFrame:
 
 def fixation_dwell_fraction(total_fixation_dur_ms: float | None, n_fix: int, w: int) -> float:
     """Fraction of the whole window spent fixating on anything at all (vs. eyes
-    moving between fixations)."""
+    moving between fixations). https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2022.755393/full"""
     if not n_fix:
         return np.nan
     return (total_fixation_dur_ms or 0) / (w * 1000.0)
@@ -101,11 +101,13 @@ def event_rate(count: int, w: int) -> float:
 
 
 def gaze_dispersion(wf: pd.DataFrame) -> float:
-    """Spread (std) of fixation x/y positions in the window -- how far the eyes
-    roamed, independent of what they were looking at."""
+    """Spatial gaze dispersion is a measure of the general tendency for the eyes to move around. 
+    It was calculated as the SD in gaze across time points, averaged across x and y coordinates, and transformed to logarithmic values. Smaller values indicate less gaze dispersion.
+    https://www.jneurosci.org/content/jneuro/43/32/5856.full.pdf"""
     if len(wf) < 2:
         return np.nan
-    return float(np.sqrt(wf["x"].var(ddof=0) + wf["y"].var(ddof=0)))
+    avg_sd = (wf["x"].std(ddof=0) + wf["y"].std(ddof=0)) / 2.0
+    return float(np.log(avg_sd)) if avg_sd > 0 else np.nan
 
 
 def scanpath_length_rate(wf: pd.DataFrame, w: int) -> float:
