@@ -34,9 +34,9 @@ def window_rows(df: pd.DataFrame, w, features: list[str]) -> pd.DataFrame:
     return df[df["window"] == w].dropna(subset=features).copy()
 
 
-def make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
+def make_rf(hva_cfg: dict) -> RandomForestClassifier:
     return RandomForestClassifier(
-        n_estimators=hva_cfg.get(n_estimators_key, 300),
+        n_estimators=hva_cfg.get("rf_n_estimators", 300),
         max_depth=hva_cfg.get("rf_max_depth", 4),
         min_samples_leaf=hva_cfg.get("rf_min_samples_leaf", 5),
         random_state=hva_cfg.get("rf_random_state", 0),
@@ -44,15 +44,20 @@ def make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
     )
 
 
-def loso_predictions(base: pd.DataFrame, features: list[str], hva_cfg: dict, seed: int) -> dict[str, tuple[list, list]]:
+def loso_predictions(
+    base: pd.DataFrame, features: list[str], hva_cfg: dict, seed: int
+) -> dict[str, tuple[list, list, np.ndarray]]:
     """One leave-one-subject-out pass with the Random Forest.
 
     For each held-out subject: balance using only the remaining (training)
     subjects, then test on the held-out subject's full, untouched data --
-    their rows are never balanced away.
+    their rows are never balanced away. SHAP values for the held-out rows are
+    computed from that same fitted model, so they explain exactly the
+    predictions returned alongside them.
     """
     y_true = {"rf": []}
     y_pred = {"rf": []}
+    shap_rows = {"rf": []}
     for s in base["subject"].unique():
         train_raw, test_raw = base[base["subject"] != s], base[base["subject"] == s]
         if test_raw.empty:
@@ -61,19 +66,28 @@ def loso_predictions(base: pd.DataFrame, features: list[str], hva_cfg: dict, see
         if train_bal["label"].nunique() < 2:
             continue
 
-        rf = make_rf(hva_cfg, "rf_n_estimators")
+        rf = make_rf(hva_cfg)
         rf.fit(train_bal[features], train_bal["label"])
         p = rf.predict_proba(test_raw[features])[:, 1]
         y_true["rf"].extend(test_raw["label"].tolist())
         y_pred["rf"].extend(p.tolist())
 
-    return {"rf": (y_true["rf"], y_pred["rf"])}
+        explainer = shap.TreeExplainer(rf)
+        sv = explainer.shap_values(test_raw[features])
+        if isinstance(sv, list):
+            sv = sv[1]  # positive-class (label=1) SHAP values
+        elif sv.ndim == 3:
+            sv = sv[:, :, 1]
+        shap_rows["rf"].append(np.abs(sv))
+
+    shap_matrix = np.vstack(shap_rows["rf"]) if shap_rows["rf"] else np.empty((0, len(features)))
+    return {"rf": (y_true["rf"], y_pred["rf"], shap_matrix)}
 
 
 def score(y_true: list, y_pred: list, threshold: float) -> dict[str, float | None]:
     if len(set(y_true)) < 2:
         return {"auc": None, "accuracy": None, "precision": None, "recall": None, "f1": None}
-    pred = (np.array(y_pred) > threshold).astype(int)
+    pred = (np.array(y_pred) >= threshold).astype(int)
     return {
         "auc": roc_auc_score(y_true, y_pred),
         "accuracy": accuracy_score(y_true, pred),
@@ -83,7 +97,12 @@ def score(y_true: list, y_pred: list, threshold: float) -> dict[str, float | Non
     }
 
 
-def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Pooled scores/SHAP values are per held-out decision, not per subject --
+    subjects who contribute more decisions get proportionally more weight in
+    each repeat's numbers. That matches "decision" as the modeling unit, but
+    should be stated in the methods write-up.
+    """
     hva_cfg = cfg["help_vs_auto"]
     features = hva_cfg["features"]
     n_repeats = hva_cfg.get("n_balance_repeats", 10)
@@ -92,6 +111,7 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
 
     results = []
     cm_rows = []
+    shap_rows = []
     for w in sorted(df["window"].unique()):
         base = window_rows(df, w, features)
         if base.empty:
@@ -99,20 +119,36 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
 
         scores = {"rf": []}
         cms = {"rf": np.zeros((2, 2), dtype=int)}
+        shap_pool = {"rf": []}
         for r in range(n_repeats):
             preds = loso_predictions(base, features, hva_cfg, seed0 + r)
-            for model_name, (yt, yp) in preds.items():
+            for model_name, (yt, yp, sv) in preds.items():
                 scores[model_name].append(score(yt, yp, threshold))
                 if len(set(yt)) >= 2:
-                    pred = (np.array(yp) > threshold).astype(int)
+                    pred = (np.array(yp) >= threshold).astype(int)
                     cms[model_name] += confusion_matrix(yt, pred, labels=[0, 1])
+                if sv.size:
+                    # One mean-abs-SHAP vector per repeat, not per row -- so the SD below
+                    # reflects repeat-to-repeat stability, matching how accuracy_*_sd is computed.
+                    shap_pool[model_name].append(sv.mean(axis=0))
 
-        row = {"window_s": w, "n_per_class": base["label"].value_counts().min()}
+        if shap_pool["rf"]:
+            repeat_means = np.vstack(shap_pool["rf"])
+            shap_rows.append(pd.DataFrame({
+                "window_s": w, "feature": features,
+                "mean_abs_shap": repeat_means.mean(axis=0),
+                "mean_abs_shap_sd": repeat_means.std(axis=0, ddof=1) if len(repeat_means) > 1 else 0.0,
+            }))
+
+        # Confusion-matrix counts (below) are summed across all n_repeats repeats, so
+        # tn/fp/fn/tp are ~n_repeats x the number of held-out decisions, not per-repeat counts.
+        # recall_alt/precision_alt/specificity_auto are ratios, so they're unaffected by the scaling.
+        row = {"window_s": w, "minority_class_n_full_data": base["label"].value_counts().min()}
         for model_name, sc in scores.items():
             for metric in ("auc", "accuracy", "precision", "recall", "f1"):
                 vals = [d[metric] for d in sc if d[metric] is not None]
                 row[f"{metric}_{model_name}_mean"] = np.mean(vals) if vals else None
-                row[f"{metric}_{model_name}_sd"] = np.std(vals) if vals else None
+                row[f"{metric}_{model_name}_sd"] = np.std(vals, ddof=1) if len(vals) > 1 else (0.0 if vals else None)
         results.append(row)
         rf_accuracy = row["accuracy_rf_mean"]
         rf_str = f"{rf_accuracy:.3f}" if rf_accuracy is not None else "n/a"
@@ -121,7 +157,7 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
         for model_name, cm in cms.items():
             tn, fp, fn, tp = (int(v) for v in cm.ravel())
             cm_rows.append({
-                "window_s": w, "model": model_name,
+                "window_s": w, "model": model_name, "n_repeats": n_repeats,
                 "tn": tn, "fp": fp, "fn": fn, "tp": tp,
                 "recall_alt": tp / (tp + fn) if (tp + fn) else None,
                 "precision_alt": tp / (tp + fp) if (tp + fp) else None,
@@ -129,50 +165,8 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
             })
         print(f"window={w}s  confusion matrix computed (RF)")
 
-    return pd.DataFrame(results), pd.DataFrame(cm_rows)
-
-
-def shap_values(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
-    """Mean absolute SHAP value per feature, from a Random Forest fit on each
-    LOSO fold (TreeExplainer against the held-out subject's data), averaged
-    across folds."""
-    hva_cfg = cfg["help_vs_auto"]
-    features = hva_cfg["features"]
-    seed0 = hva_cfg.get("random_state", 42)
-
-    rows = []
-    for w in sorted(df["window"].unique()):
-        base = window_rows(df, w, features)
-        if base.empty:
-            continue
-
-        fold_shap = []
-        for s in base["subject"].unique():
-            train_raw, test_raw = base[base["subject"] != s], base[base["subject"] == s]
-            if test_raw.empty or test_raw["label"].nunique() < 2:
-                continue
-            train_bal = balanced_sample(train_raw, seed0)
-            if train_bal["label"].nunique() < 2:
-                continue
-            rf = make_rf(hva_cfg, "rf_shap_n_estimators")
-            rf.fit(train_bal[features], train_bal["label"])
-            explainer = shap.TreeExplainer(rf)
-            sv = explainer.shap_values(test_raw[features])
-            if isinstance(sv, list):
-                sv = sv[1]  # positive-class (label=1) SHAP values
-            elif sv.ndim == 3:
-                sv = sv[:, :, 1]
-            fold_shap.append(np.abs(sv).mean(axis=0))
-
-        if not fold_shap:
-            continue
-        fold_shap = np.array(fold_shap)
-        rows.append(pd.DataFrame({
-            "window_s": w, "feature": features,
-            "mean_abs_shap": fold_shap.mean(axis=0),
-            "mean_abs_shap_sd": fold_shap.std(axis=0),
-        }))
-    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+    shap_df = pd.concat(shap_rows, ignore_index=True) if shap_rows else pd.DataFrame()
+    return pd.DataFrame(results), shap_df, pd.DataFrame(cm_rows)
 
 
 def build_features_dataset(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -209,7 +203,7 @@ def run_models(cfg: dict, features_df: pd.DataFrame | None = None) -> tuple[pd.D
         features_out = processed / hva_cfg.get("features_file", "help_vs_auto_features.csv")
         features_df = pd.read_csv(features_out)
 
-    results, cm = run_classifiers(cfg, features_df)
+    results, shap_df, cm = run_classifiers(cfg, features_df)
     results_out = processed / hva_cfg.get("results_file", "help_vs_auto_classifier_results.csv")
     results.to_csv(results_out, index=False)
     print(f"Saved -> {results_out}")
@@ -218,7 +212,6 @@ def run_models(cfg: dict, features_df: pd.DataFrame | None = None) -> tuple[pd.D
     cm.to_csv(cm_out, index=False)
     print(f"Saved -> {cm_out}")
 
-    shap_df = shap_values(cfg, features_df)
     shap_out = processed / hva_cfg.get("shap_file", "help_vs_auto_shap_values.csv")
     shap_df.to_csv(shap_out, index=False)
     print(f"Saved -> {shap_out}")

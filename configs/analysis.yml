@@ -67,8 +67,7 @@ help_vs_auto:
   ablation_n_repeats: 5 # same, but for ablation_auc -- reruns once per feature, so kept lower than n_balance_repeats
   random_state: 42
  
-  rf_n_estimators: 300 # trees per LOSO fold fit (run_classifiers)
-  rf_shap_n_estimators: 500 # trees for the single fit used in shap_values
+  rf_n_estimators: 300 # trees per LOSO fold fit (used for both accuracy and SHAP)
   rf_max_depth: 3
   rf_min_samples_leaf: 10
   rf_random_state: 0
