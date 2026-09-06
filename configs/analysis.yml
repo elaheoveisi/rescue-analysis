@@ -11,7 +11,7 @@ sub:
   - P010
   - P011
   - P012
-  - P013
+  #- P013
 
 trials: [gemini, openai, dummy]
 # Participant expertise: expert or novice
@@ -47,10 +47,7 @@ analysis:
     fixation_aoi_file: fixations_aoi.csv
     aoi_transitions_file: aoi_transitions.csv
 
-# Shared AOI grouping for SGE/GTE (gaze_entropy.run_entropy_grouped), so both
-# metrics use the same category set. Anything not listed here (empty tiles,
-# walls -> "other"; offscreen) passes through unchanged and is excluded from
-# GTE's transition matrix.
+
 entropy_groups:
   Victim: [victim, fake_victim]
   Hazard: [lava]
@@ -63,44 +60,57 @@ help_vs_auto:
   exclude_participants: [ P005, P013 ]
   llm_trials: [ gemini, openai ] # dummy has no LLM, so no automatic events -- gemini and openai are pooled, not modeled separately
   auto_interval_steps: 50 # game steps between automatic LLM recommendations
-  windows_s: [ 0.25, 0.5, 0.75, 1, 2, 5, 10, 15, 20 ] # seconds of look-back before each event
+  windows_s: [ 2, 5, 10, 15, 20 ] # seconds of look-back before each event
   min_fixations: 2 # below this, SGE/GTE for that window are left null
   recent_window_s: 2 # look-back for the recency-weighted "recent_*_dwell_fraction" features
   n_balance_repeats: 10 # repeats of majority-class downsampling, averaged
+  ablation_n_repeats: 5 # same, but for ablation_auc -- reruns once per feature, so kept lower than n_balance_repeats
   random_state: 42
-  # Random Forest hyperparameters (sklearn.ensemble.RandomForestClassifier).
-  # rf_n_estimators/rf_importance_n_estimators are separate because the
-  # importance fit is a single fit (not averaged over LOSO folds), so it uses
-  # more trees for a more stable ranking.
+ 
   rf_n_estimators: 300 # trees per LOSO fold fit (run_classifiers)
-  rf_importance_n_estimators: 500 # trees for the single fit used in permutation importance
+  rf_shap_n_estimators: 500 # trees for the single fit used in shap_values
   rf_max_depth: 3
   rf_min_samples_leaf: 10
   rf_random_state: 0
-  perm_importance_n_repeats: 20 # shuffles per feature in feature_importance's permutation_importance
-  perm_importance_random_state: 0
   classification_threshold: 0.5 # predicted-probability cutoff for label=1 (Alt) in _score and confusion_matrices
   events_file: help_vs_auto_events.csv
   features_file: help_vs_auto_features.csv
   results_file: help_vs_auto_classifier_results.csv
-  importance_file: help_vs_auto_feature_importance.csv
+  shap_file: help_vs_auto_shap_values.csv
   confusion_matrix_file: help_vs_auto_confusion_matrix.csv
-  # Eyes/pupil/gaze features only. "time_since_last_event_s" is deliberately
-  # excluded: it tracks the automatic trigger's fixed 50-step cadence almost
-  # exactly, so it would predict the game's clock rather than reflect any real
-  # gaze/pupil signal.
+  ablation_file: help_vs_auto_ablation.csv
+
   features:
     [
-      sge, gte,
-      fixation_rate_hz, mean_fixation_dur_ms, fixation_dwell_fraction,
-      saccade_rate_hz, mean_saccade_dur_ms, mean_saccade_amp_px, saccade_velocity_px_s, saccade_amp_sd_px,
-      std_pupil_diam, mean_pupil_diameter, peak_pupil_diameter, pupil_slope_per_s,
-      victim_dwell_fraction, hazard_dwell_fraction, access_dwell_fraction, interface_dwell_fraction,
-      recent_victim_dwell_fraction, recent_interface_dwell_fraction,
-      dwell_diff_interface_victim,
-      gaze_dispersion_px, aoi_transition_rate_hz, revisit_count, blink_rate_hz,
-      last_aoi_victim, last_aoi_hazard, last_aoi_access, last_aoi_interface,
-      last_transition_to_interface, last_transition_from_interface,
+      # -- not AOI-based: pure eye-movement kinematics, independent of what was being looked at --
+      #sge, gte,
+      fixation_rate_hz,
+      mean_fixation_dur_ms,
+      max_fixation_dur_ms,
+      fixation_dwell_fraction,
+      dwell_time_ms,
+      n_saccades,
+      saccade_rate_hz,
+      mean_saccade_dur_ms,
+      mean_saccade_amp_px,
+      saccade_velocity_px_s,
+      peak_saccade_velocity_px_s,
+      saccade_amp_sd_px,
+      last_saccade_amplitude_px,
+      last_saccade_duration_ms,
+      last_saccade_velocity_px_s,
+      last_saccade_peak_velocity_px_s,
+      std_pupil_diam,
+      mean_pupil_diameter,
+      peak_pupil_diameter,
+      pupil_slope_per_s,
+      gaze_dispersion_px,
+      scanpath_length_rate_px_s,
+      blink_rate_hz,
+
+      # -- AOI-based: which entropy_groups category (Victim/Hazard/Access/Interface) gaze moved between --
+      #  aoi_transition_rate_hz,
+      #  revisit_count,
     ]
 
 xdf:

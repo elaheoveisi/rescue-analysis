@@ -111,6 +111,9 @@ def build_eye_features(
         "mean_fixation_dur_ms": float(fix_df["duration_ms"].mean())
         if not fix_df.empty
         else None,
+        "max_fixation_dur_ms": float(fix_df["duration_ms"].max())
+        if not fix_df.empty
+        else None,
         "total_fixation_dur_ms": float(fix_df["duration_ms"].sum())
         if not fix_df.empty
         else None,

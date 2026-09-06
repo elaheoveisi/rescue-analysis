@@ -124,21 +124,80 @@ def build_events(cfg: dict) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def dwell_fractions(wf: pd.DataFrame, group_names: list[str]) -> dict:
-    """Of the time spent fixating on anything, what fraction went to each
-    entropy_groups category (Victim/Hazard/Access/Interface).
 
-    `wf["obj_type"]` must already be regrouped via gaze_entropy.regroup_obj_type,
-    same categories SGE/GTE use -- no separate category list here. Same
-    computation gaze_entropy.dte does internally
-    (groupby("obj_type")["duration_ms"].sum(), normalized) -- just returned as
-    per-category fractions instead of collapsed into an entropy scalar.
-    """
     grouped = wf[wf["obj_type"].isin(group_names)]
     total = grouped["duration_ms"].sum()
     if total <= 0 or grouped.empty:
         return {f"{g.lower()}_dwell_fraction": np.nan for g in group_names}
     by_type = grouped.groupby("obj_type")["duration_ms"].sum()
     return {f"{g.lower()}_dwell_fraction": by_type.get(g, 0.0) / total for g in group_names}
+
+
+def pct_duration_by_group(wf: pd.DataFrame, w: int, group_names: list[str]) -> dict:
+    """Fraction of the whole window's duration spent looking at each
+    entropy_groups category (victim+fake_victim as one "Victim" group, etc.
+    -- same grouping dwell_fractions uses). Unlike dwell_fractions, these
+    don't renormalize to sum to 1 -- idle/untracked gaze time isn't
+    redistributed -- and an absent group is 0.0 (it simply wasn't looked
+    at), not NaN."""
+    if wf.empty:
+        return {f"{g.lower()}_pct_dur": 0.0 for g in group_names}
+    by_group = wf.groupby("obj_type")["duration_ms"].sum()
+    return {f"{g.lower()}_pct_dur": by_group.get(g, 0.0) / (w * 1000.0) for g in group_names}
+
+
+def fixation_stats_by_group(wf: pd.DataFrame, group_names: list[str]) -> dict:
+    """Per entropy_groups category, fixation count and mean duration."""
+    stats = {}
+    for g in group_names:
+        on_group = wf[wf["obj_type"] == g]
+        stats[f"{g.lower()}_n_fixations"] = len(on_group)
+        stats[f"{g.lower()}_mean_fixation_dur_ms"] = float(on_group["duration_ms"].mean()) if not on_group.empty else np.nan
+    return stats
+
+
+def saccade_stats_by_group(ws: pd.DataFrame, wf: pd.DataFrame, group_names: list[str]) -> dict:
+    """Per entropy_groups category, saccade count, mean amplitude, and mean
+    velocity. Saccades carry no AOI label of their own, so each is
+    attributed to the group of the fixation it lands on -- the first
+    fixation starting at or after the saccade ends."""
+    keys = [f"{g.lower()}_{suffix}" for g in group_names for suffix in ("n_saccades", "mean_saccade_amp_px", "mean_saccade_velocity_px_s")]
+    if ws.empty or wf.empty:
+        return {k: (0 if k.endswith("n_saccades") else np.nan) for k in keys}
+
+    saccades_by_end = ws.sort_values("end_ms")
+    fixations_by_start = (
+        wf[["start_ms", "obj_type"]]
+        .rename(columns={"start_ms": "landing_fixation_start_ms"})
+        .sort_values("landing_fixation_start_ms")
+    )
+    landed_on = pd.merge_asof(
+        saccades_by_end, fixations_by_start,
+        left_on="end_ms", right_on="landing_fixation_start_ms", direction="forward",
+    )
+
+    stats = {}
+    for g in group_names:
+        on_group = landed_on[landed_on["obj_type"] == g]
+        stats[f"{g.lower()}_n_saccades"] = len(on_group)
+        stats[f"{g.lower()}_mean_saccade_amp_px"] = float(on_group["amplitude"].mean()) if not on_group.empty else np.nan
+        stats[f"{g.lower()}_mean_saccade_velocity_px_s"] = saccade_velocity(on_group) if not on_group.empty else np.nan
+    return stats
+
+
+def recent_dwell_fractions_suffixed(
+    wf: pd.DataFrame, group_names: list[str], lo: float, w: int, recent_window_s: float
+) -> dict:
+    """Same as dwell_fractions on entropy_groups categories, but restricted
+    to the last `recent_window_s` seconds. Same computation as the existing
+    recent_dwell_fractions(), just with the config's
+    `{group}_recent_dwell_fraction` suffix naming instead of that function's
+    `recent_{group}_*` prefix."""
+    recent_span = min(recent_window_s, w)
+    recent_lo = lo + (w - recent_span) * 1000.0
+    recent_wf = wf[wf["start_ms"] >= recent_lo]
+    per_group = dwell_fractions(recent_wf, group_names)
+    return {k.replace("_dwell_fraction", "_recent_dwell_fraction"): v for k, v in per_group.items()}
 
 
 def fixation_dwell_fraction(total_fixation_dur_ms: float | None, n_fix: int, w: int) -> float:
@@ -160,6 +219,23 @@ def gaze_dispersion(wf: pd.DataFrame) -> float:
     if len(wf) < 2:
         return np.nan
     return float(np.sqrt(wf["x"].var(ddof=0) + wf["y"].var(ddof=0)))
+
+
+def scanpath_length_rate(wf: pd.DataFrame, w: int) -> float:
+    """Total distance traveled fixation-to-fixation in the window (scanpath
+    length: the path connecting consecutive fixation centers), normalized by
+    window duration. Unlike gaze_dispersion_px (spread around a center), this
+    measures the actual path length traveled -- how much visual searching per
+    second, not just how far apart the fixations ended up.
+
+    https://www.sciencedirect.com/science/article/pii/S0165027003001511
+    https://pmc.ncbi.nlm.nih.gov/articles/PMC8460493/
+    """
+    if len(wf) < 2:
+        return np.nan
+    x, y = wf["x"].to_numpy(), wf["y"].to_numpy()
+    length = np.hypot(np.diff(x), np.diff(y)).sum()
+    return float(length / w)
 
 
 def aoi_transition_rate(wf: pd.DataFrame, w: int) -> float:
@@ -235,6 +311,70 @@ def saccade_amplitude_sd(ws: pd.DataFrame) -> float:
     return float(ws["amplitude"].std())
 
 
+def saccade_peak_velocity(ws: pd.DataFrame, we: pd.DataFrame, eye_cfg: dict) -> float:
+    """Fastest instantaneous point-to-point gaze speed during any saccade in
+    the window, px/s. saccade_velocity() only has each saccade's amplitude and
+    total duration, which gives an average speed and misses the true
+    within-saccade peak -- this instead walks the raw eye samples inside each
+    saccade's [start_ms, end_ms] span and takes the largest consecutive-sample
+    speed, then reports the max across all saccades in the window.
+
+    https://link.springer.com/article/10.1140/epjs/s11734-026-02324-9
+    https://www.nature.com/articles/s41467-018-05319-w
+    """
+    if ws.empty or we.empty:
+        return np.nan
+    x_col, y_col = eye_cfg["x_col"], eye_cfg["y_col"]
+    we = we.dropna(subset=[x_col, y_col]).sort_values("rel_ms")
+    if len(we) < 2:
+        return np.nan
+    t = we["rel_ms"].to_numpy()
+    x = we[x_col].to_numpy() * eye_cfg["screen_w"]
+    y = we[y_col].to_numpy() * eye_cfg["screen_h"]
+
+    peaks = []
+    for _, sacc in ws.iterrows():
+        mask = (t >= sacc["start_ms"]) & (t <= sacc["end_ms"])
+        if mask.sum() < 2:
+            continue
+        tt, xx, yy = t[mask], x[mask], y[mask]
+        dt_s = np.diff(tt) / 1000.0
+        valid = dt_s > 0
+        if not valid.any():
+            continue
+        dist = np.hypot(np.diff(xx)[valid], np.diff(yy)[valid])
+        peaks.append(float((dist / dt_s[valid]).max()))
+    return max(peaks) if peaks else np.nan
+
+
+def last_saccade_features(ws: pd.DataFrame, we: pd.DataFrame, eye_cfg: dict) -> dict:
+    """Amplitude, duration, mean velocity, and peak velocity of the single
+    saccade closest to the event -- the last one to occur within the window,
+    as opposed to the window-wide saccade features above which summarize
+    every saccade in the window.
+
+    https://www.nature.com/articles/s41467-018-05319-w.pdf
+    """
+    keys = [
+        "last_saccade_amplitude_px", "last_saccade_duration_ms",
+        "last_saccade_velocity_px_s", "last_saccade_peak_velocity_px_s",
+    ]
+    if ws.empty:
+        return {k: np.nan for k in keys}
+    last = ws.sort_values("start_ms").iloc[-1]
+    amplitude = float(last["amplitude"])
+    duration_ms = float(last["duration_ms"])
+    dur_s = duration_ms / 1000.0
+    velocity = amplitude / dur_s if dur_s > 0 else np.nan
+    peak_velocity = saccade_peak_velocity(pd.DataFrame([last]), we, eye_cfg)
+    return {
+        "last_saccade_amplitude_px": amplitude,
+        "last_saccade_duration_ms": duration_ms,
+        "last_saccade_velocity_px_s": velocity,
+        "last_saccade_peak_velocity_px_s": peak_velocity,
+    }
+
+
 def pupil_trend(we: pd.DataFrame, lo: float, missing: float = 0.0) -> dict:
     """Mean, peak, and linear trend (slope, per second) of pupil diameter within
     the window. build_eye_features only reports the pupil SD, not these.
@@ -242,6 +382,11 @@ def pupil_trend(we: pd.DataFrame, lo: float, missing: float = 0.0) -> dict:
     Invalid samples are recorded as `missing` (cfg["eyetracker"]["missing"]), not
     NaN -- same replace-then-dropna build_eye_features uses, so the missing
     sentinel doesn't get averaged in as a real (near-zero) pupil reading.
+
+    pupil_slope_per_s: linear regression of pupil diameter on time-in-window
+    (OLS slope, beta_1). Kontogiorgos et al. (2021) used linear regression the
+    same way to get pupil-diameter slope per segment:
+    https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2021.623657/full
     """
     pupil = we["avg_pupil_diam"].replace(missing, np.nan).dropna()
     if pupil.empty:
@@ -289,7 +434,8 @@ def recent_dwell_fractions(wf: pd.DataFrame, group_names: list[str], lo: float, 
 # ---------------------------------------------------------------------------
 
 def window_features(
-    cfg: dict, wf: pd.DataFrame, ws: pd.DataFrame, we: pd.DataFrame, lo: float, w: int, group_names: list[str]
+    cfg: dict, wf: pd.DataFrame, ws: pd.DataFrame, we: pd.DataFrame, lo: float, w: int,
+    group_names: list[str],
 ) -> dict:
     
     eye_feats = build_eye_features(wf, ws, we, cfg["eyetracker"])
@@ -309,23 +455,40 @@ def window_features(
     return {
         "fixation_rate_hz": event_rate(n_fix, w),
         "mean_fixation_dur_ms": eye_feats["mean_fixation_dur_ms"],
+        "max_fixation_dur_ms": eye_feats["max_fixation_dur_ms"],
         "fixation_dwell_fraction": fixation_dwell_fraction(eye_feats["total_fixation_dur_ms"], n_fix, w),
+        "dwell_time_ms": eye_feats["total_fixation_dur_ms"],
+        "n_saccades": n_sacc,
         "saccade_rate_hz": event_rate(n_sacc, w),
         "mean_saccade_dur_ms": eye_feats["mean_saccade_dur_ms"],
         "mean_saccade_amp_px": eye_feats["mean_saccade_amp_px"],
         "saccade_velocity_px_s": saccade_velocity(ws),
+        "peak_saccade_velocity_px_s": saccade_peak_velocity(ws, we, cfg["eyetracker"]),
         "saccade_amp_sd_px": saccade_amplitude_sd(ws),
         "std_pupil_diam": eye_feats["std_pupil_diam"],
         "gaze_dispersion_px": gaze_dispersion(wf),
+        "scanpath_length_rate_px_s": scanpath_length_rate(wf, w),
         "aoi_transition_rate_hz": aoi_transition_rate(wf_aoi, w),
         "revisit_count": revisit_count(wf_aoi),
         "blink_rate_hz": blink_rate(we, w),
         "dwell_diff_interface_victim": dwell_diff(dwell, "Interface", "Victim"),
+        **last_saccade_features(ws, we, cfg["eyetracker"]),
         **pupil_trend(we, lo, missing=cfg["eyetracker"].get("missing", 0.0)),
         **dwell,
         **last_aoi_fixated(wf_aoi, group_names),
         **last_transition(wf_aoi, "Interface"),
         **recent_dwell_fractions(wf, group_names, lo, w, cfg["help_vs_auto"].get("recent_window_s", 2)),
+
+        # Per-entropy_groups-category breakdown (configs/analysis.yml's
+        # help_vs_auto.features per-category list): pct_dur, fixation/saccade
+        # counts and stats, and a suffix-named recent dwell fraction, all at
+        # the same Victim/Hazard/Access/Interface granularity as `dwell`
+        # above -- computed over the full `wf`, not `wf_aoi`, since pct_dur
+        # is a fraction of window time, not of AOI-only time.
+        **pct_duration_by_group(wf, w, group_names),
+        **fixation_stats_by_group(wf, group_names),
+        **saccade_stats_by_group(ws, wf, group_names),
+        **recent_dwell_fractions_suffixed(wf, group_names, lo, w, cfg["help_vs_auto"].get("recent_window_s", 2)),
     }
 
 

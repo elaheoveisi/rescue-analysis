@@ -6,10 +6,16 @@ import warnings
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import shap
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.inspection import permutation_importance
-from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
-from statsmodels.genmod.bayes_mixed_glm import BinomialBayesMixedGLM
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from features.help_vs_auto_features import build_events, build_features
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -24,44 +30,8 @@ def balanced_sample(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     )
 
 
-def loso_glmm(balanced_df: pd.DataFrame, fixed_effect_cols: list[str]) -> tuple[list, list]:
-    formula = "label ~ " + " + ".join(fixed_effect_cols)
-    y_true, y_pred = [], []
-    for s in balanced_df["subject_cat"].unique():
-        train, test = balanced_df[balanced_df["subject_cat"] != s], balanced_df[balanced_df["subject_cat"] == s]
-        if train["label"].nunique() < 2 or test.empty:
-            continue
-        try:
-            model = BinomialBayesMixedGLM.from_formula(formula, {"subject": "0 + C(subject_cat)"}, train)
-            fit = model.fit_vb()
-            test_exog = np.column_stack([np.ones(len(test))] + [test[c].to_numpy() for c in fixed_effect_cols])
-            p = fit.predict(exog=test_exog)
-            y_true.extend(test["label"].tolist())
-            y_pred.extend(np.atleast_1d(p).tolist())
-        except Exception:
-            continue
-    return y_true, y_pred
-
-
-def loso_sklearn(balanced_df: pd.DataFrame, fixed_effect_cols: list[str], make_model) -> tuple[list, list]:
-    y_true, y_pred = [], []
-    for s in balanced_df["subject_cat"].unique():
-        train, test = balanced_df[balanced_df["subject_cat"] != s], balanced_df[balanced_df["subject_cat"] == s]
-        if train["label"].nunique() < 2 or test.empty:
-            continue
-        model = make_model()
-        model.fit(train[fixed_effect_cols], train["label"])
-        p = model.predict_proba(test[fixed_effect_cols])[:, 1]
-        y_true.extend(test["label"].tolist())
-        y_pred.extend(p.tolist())
-    return y_true, y_pred
-
-
-def score(y_true: list, y_pred: list, threshold: float) -> tuple[float | None, float | None]:
-    if len(set(y_true)) < 2:
-        return None, None
-    pred = (np.array(y_pred) > threshold).astype(int)
-    return roc_auc_score(y_true, y_pred), accuracy_score(y_true, pred)
+def window_rows(df: pd.DataFrame, w, features: list[str]) -> pd.DataFrame:
+    return df[df["window"] == w].dropna(subset=features).copy()
 
 
 def make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
@@ -70,25 +40,50 @@ def make_rf(hva_cfg: dict, n_estimators_key: str) -> RandomForestClassifier:
         max_depth=hva_cfg.get("rf_max_depth", 4),
         min_samples_leaf=hva_cfg.get("rf_min_samples_leaf", 5),
         random_state=hva_cfg.get("rf_random_state", 0),
+        n_jobs=-1,
     )
 
 
-def prep_window(df: pd.DataFrame, w, features: list[str]) -> tuple[pd.DataFrame, list[str]]:
-    """One window's rows, globally z-scored per feature, with a categorical
-    subject column for grouping -- shared prep step for run_classifiers,
-    feature_importance, and confusion_matrices."""
-    base = df[df["window"] == w].dropna(subset=features).copy()
-    if base.empty:
-        return base, []
-    base["subject_cat"] = base["subject"].astype("category")  # subject_cat definition (random intercept)
-    fixed_effect_cols = [f + "_z" for f in features]  # fixed_effect_cols definition (fixed effect)
-    for f, z in zip(features, fixed_effect_cols):
-        sd = base[f].std()
-        base[z] = (base[f] - base[f].mean()) / sd if sd > 0 else 0.0
-    return base, fixed_effect_cols
+def loso_predictions(base: pd.DataFrame, features: list[str], hva_cfg: dict, seed: int) -> dict[str, tuple[list, list]]:
+    """One leave-one-subject-out pass with the Random Forest.
+
+    For each held-out subject: balance using only the remaining (training)
+    subjects, then test on the held-out subject's full, untouched data --
+    their rows are never balanced away.
+    """
+    y_true = {"rf": []}
+    y_pred = {"rf": []}
+    for s in base["subject"].unique():
+        train_raw, test_raw = base[base["subject"] != s], base[base["subject"] == s]
+        if test_raw.empty:
+            continue
+        train_bal = balanced_sample(train_raw, seed)
+        if train_bal["label"].nunique() < 2:
+            continue
+
+        rf = make_rf(hva_cfg, "rf_n_estimators")
+        rf.fit(train_bal[features], train_bal["label"])
+        p = rf.predict_proba(test_raw[features])[:, 1]
+        y_true["rf"].extend(test_raw["label"].tolist())
+        y_pred["rf"].extend(p.tolist())
+
+    return {"rf": (y_true["rf"], y_pred["rf"])}
 
 
-def run_classifiers(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
+def score(y_true: list, y_pred: list, threshold: float) -> dict[str, float | None]:
+    if len(set(y_true)) < 2:
+        return {"auc": None, "accuracy": None, "precision": None, "recall": None, "f1": None}
+    pred = (np.array(y_pred) > threshold).astype(int)
+    return {
+        "auc": roc_auc_score(y_true, y_pred),
+        "accuracy": accuracy_score(y_true, pred),
+        "precision": precision_score(y_true, pred, zero_division=0),
+        "recall": recall_score(y_true, pred, zero_division=0),
+        "f1": f1_score(y_true, pred, zero_division=0),
+    }
+
+
+def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     hva_cfg = cfg["help_vs_auto"]
     features = hva_cfg["features"]
     n_repeats = hva_cfg.get("n_balance_repeats", 10)
@@ -96,106 +91,94 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
     threshold = hva_cfg.get("classification_threshold", 0.5)
 
     results = []
+    cm_rows = []
     for w in sorted(df["window"].unique()):
-        base, fixed_effect_cols = prep_window(df, w, features)
+        base = window_rows(df, w, features)
         if base.empty:
             continue
 
-        scores = {"glmm": [], "rf": []}
+        scores = {"rf": []}
+        cms = {"rf": np.zeros((2, 2), dtype=int)}
         for r in range(n_repeats):
-            balanced_df = balanced_sample(base, seed0 + r)
-
-            scores["glmm"].append(score(*loso_glmm(balanced_df, fixed_effect_cols), threshold))
-            scores["rf"].append(score(*loso_sklearn(
-                balanced_df, fixed_effect_cols, lambda: make_rf(hva_cfg, "rf_n_estimators"),
-            ), threshold))
+            preds = loso_predictions(base, features, hva_cfg, seed0 + r)
+            for model_name, (yt, yp) in preds.items():
+                scores[model_name].append(score(yt, yp, threshold))
+                if len(set(yt)) >= 2:
+                    pred = (np.array(yp) > threshold).astype(int)
+                    cms[model_name] += confusion_matrix(yt, pred, labels=[0, 1])
 
         row = {"window_s": w, "n_per_class": base["label"].value_counts().min()}
         for model_name, sc in scores.items():
-            aucs = [a for a, _ in sc if a is not None]
-            accs = [c for _, c in sc if c is not None]
-            row[f"auc_{model_name}_mean"] = np.mean(aucs) if aucs else None
-            row[f"auc_{model_name}_sd"] = np.std(aucs) if aucs else None
-            row[f"acc_{model_name}_mean"] = np.mean(accs) if accs else None
+            for metric in ("auc", "accuracy", "precision", "recall", "f1"):
+                vals = [d[metric] for d in sc if d[metric] is not None]
+                row[f"{metric}_{model_name}_mean"] = np.mean(vals) if vals else None
+                row[f"{metric}_{model_name}_sd"] = np.std(vals) if vals else None
         results.append(row)
-        print(f"window={w}s  GLMM AUC={row['auc_glmm_mean']:.3f}  RF AUC={row['auc_rf_mean']:.3f}")
-
-    return pd.DataFrame(results)
-
-
-def confusion_matrices(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
-    """Confusion matrix (summed over the n_balance_repeats draws) for GLMM and
-    RF at every window: tn/fp/fn/tp plus recall/precision on the Alt class and
-    specificity on the Automatic class."""
-    hva_cfg = cfg["help_vs_auto"]
-    features = hva_cfg["features"]
-    n_repeats = hva_cfg.get("n_balance_repeats", 10)
-    seed0 = hva_cfg.get("random_state", 42)
-    threshold = hva_cfg.get("classification_threshold", 0.5)
-
-    rows = []
-    for w in sorted(df["window"].unique()):
-        base, fixed_effect_cols = prep_window(df, w, features)
-        if base.empty:
-            continue
-
-        cms = {"glmm": np.zeros((2, 2), dtype=int), "rf": np.zeros((2, 2), dtype=int)}
-        for r in range(n_repeats):
-            balanced_df = balanced_sample(base, seed0 + r)
-
-            yt, yp = loso_glmm(balanced_df, fixed_effect_cols)
-            pred = (np.array(yp) > threshold).astype(int)
-            cms["glmm"] += confusion_matrix(yt, pred, labels=[0, 1])
-
-            yt, yp = loso_sklearn(balanced_df, fixed_effect_cols, lambda: make_rf(hva_cfg, "rf_n_estimators"))
-            pred = (np.array(yp) > threshold).astype(int)
-            cms["rf"] += confusion_matrix(yt, pred, labels=[0, 1])
+        rf_accuracy = row["accuracy_rf_mean"]
+        rf_str = f"{rf_accuracy:.3f}" if rf_accuracy is not None else "n/a"
+        print(f"window={w}s  RF accuracy={rf_str}")
 
         for model_name, cm in cms.items():
             tn, fp, fn, tp = (int(v) for v in cm.ravel())
-            rows.append({
+            cm_rows.append({
                 "window_s": w, "model": model_name,
                 "tn": tn, "fp": fp, "fn": fn, "tp": tp,
                 "recall_alt": tp / (tp + fn) if (tp + fn) else None,
                 "precision_alt": tp / (tp + fp) if (tp + fp) else None,
                 "specificity_auto": tn / (tn + fp) if (tn + fp) else None,
             })
-        print(f"window={w}s  confusion matrices computed (GLMM, RF)")
+        print(f"window={w}s  confusion matrix computed (RF)")
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(results), pd.DataFrame(cm_rows)
 
 
-def feature_importance(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
-    """Permutation importance (drop in AUC when a feature is shuffled), from a
-    Random Forest fit on the balanced data per window."""
+def shap_values(cfg: dict, df: pd.DataFrame) -> pd.DataFrame:
+    """Mean absolute SHAP value per feature, from a Random Forest fit on each
+    LOSO fold (TreeExplainer against the held-out subject's data), averaged
+    across folds."""
     hva_cfg = cfg["help_vs_auto"]
     features = hva_cfg["features"]
     seed0 = hva_cfg.get("random_state", 42)
 
     rows = []
     for w in sorted(df["window"].unique()):
-        sub = df[df["window"] == w].dropna(subset=features).copy()
-        if sub.empty:
+        base = window_rows(df, w, features)
+        if base.empty:
             continue
-        balanced_df = balanced_sample(sub, seed0)
-        X, y = balanced_df[features], balanced_df["label"]
-        rf = make_rf(hva_cfg, "rf_importance_n_estimators")
-        rf.fit(X, y)
-        perm = permutation_importance(
-            rf, X, y,
-            n_repeats=hva_cfg.get("perm_importance_n_repeats", 20),
-            random_state=hva_cfg.get("perm_importance_random_state", 0),
-            scoring="roc_auc",
-        )
+
+        fold_shap = []
+        for s in base["subject"].unique():
+            train_raw, test_raw = base[base["subject"] != s], base[base["subject"] == s]
+            if test_raw.empty or test_raw["label"].nunique() < 2:
+                continue
+            train_bal = balanced_sample(train_raw, seed0)
+            if train_bal["label"].nunique() < 2:
+                continue
+            rf = make_rf(hva_cfg, "rf_shap_n_estimators")
+            rf.fit(train_bal[features], train_bal["label"])
+            explainer = shap.TreeExplainer(rf)
+            sv = explainer.shap_values(test_raw[features])
+            if isinstance(sv, list):
+                sv = sv[1]  # positive-class (label=1) SHAP values
+            elif sv.ndim == 3:
+                sv = sv[:, :, 1]
+            fold_shap.append(np.abs(sv).mean(axis=0))
+
+        if not fold_shap:
+            continue
+        fold_shap = np.array(fold_shap)
         rows.append(pd.DataFrame({
             "window_s": w, "feature": features,
-            "perm_importance_mean": perm.importances_mean,
-            "perm_importance_sd": perm.importances_std,
+            "mean_abs_shap": fold_shap.mean(axis=0),
+            "mean_abs_shap_sd": fold_shap.std(axis=0),
         }))
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
-def run(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build_features_dataset(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build events + eye features and save them to CSV. Independent of the
+    models below -- rerun this only when the raw data, AOI labels, or feature
+    computation itself changes, not every time you want to retrain."""
     processed = Path(cfg["paths"]["processed"])
     hva_cfg = cfg["help_vs_auto"]
 
@@ -211,19 +194,42 @@ def run(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFra
     features_df.to_csv(features_out, index=False)
     print(f"Saved {len(features_df)} rows -> {features_out}")
 
-    results = run_classifiers(cfg, features_df)
+    return events_df, features_df
+
+
+def run_models(cfg: dict, features_df: pd.DataFrame | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Random Forest classification, SHAP values, and confusion matrices.
+    Reads the saved features CSV if features_df isn't passed in-memory --
+    lets this run on its own (e.g. to try a different feature list) without
+    recomputing eye features via build_features_dataset() first."""
+    processed = Path(cfg["paths"]["processed"])
+    hva_cfg = cfg["help_vs_auto"]
+
+    if features_df is None:
+        features_out = processed / hva_cfg.get("features_file", "help_vs_auto_features.csv")
+        features_df = pd.read_csv(features_out)
+
+    results, cm = run_classifiers(cfg, features_df)
     results_out = processed / hva_cfg.get("results_file", "help_vs_auto_classifier_results.csv")
     results.to_csv(results_out, index=False)
     print(f"Saved -> {results_out}")
 
-    importance = feature_importance(cfg, features_df)
-    importance_out = processed / hva_cfg.get("importance_file", "help_vs_auto_feature_importance.csv")
-    importance.to_csv(importance_out, index=False)
-    print(f"Saved -> {importance_out}")
-
-    cm = confusion_matrices(cfg, features_df)
     cm_out = processed / hva_cfg.get("confusion_matrix_file", "help_vs_auto_confusion_matrix.csv")
     cm.to_csv(cm_out, index=False)
     print(f"Saved -> {cm_out}")
 
-    return events_df, features_df, results, importance, cm
+    shap_df = shap_values(cfg, features_df)
+    shap_out = processed / hva_cfg.get("shap_file", "help_vs_auto_shap_values.csv")
+    shap_df.to_csv(shap_out, index=False)
+    print(f"Saved -> {shap_out}")
+
+    return results, shap_df, cm
+
+
+def run(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Full pipeline: build_features_dataset() + run_models(), in one call --
+    kept for backward compatibility. Prefer calling the two separately (e.g.
+    from main.py) when you only need to rerun one half."""
+    events_df, features_df = build_features_dataset(cfg)
+    results, shap_df, cm = run_models(cfg, features_df)
+    return events_df, features_df, results, shap_df, cm
