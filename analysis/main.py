@@ -60,13 +60,13 @@ with skip_run("skip", "mixed_effect_model") as check, check():
 with skip_run("skip", "power_analysis") as check, check():
     run_power_analysis(cfg)
 
-with skip_run("skip", "general_gaze_features") as check, check():
+with skip_run("run", "general_gaze_features") as check, check():
     build_general_gaze_features(cfg)
 
-with skip_run("skip", "help_vs_auto_features") as check, check():
-    build_help_vs_auto_features(cfg)
+# with skip_run("skip", "help_vs_auto_features") as check, check():
+#     build_help_vs_auto_features(cfg)
 
-with skip_run("run" 
+with skip_run("skip" 
 "", "help_vs_auto_models") as check, check():
     run_help_vs_auto_models(cfg)
 
