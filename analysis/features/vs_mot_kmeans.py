@@ -5,8 +5,6 @@ from pathlib import Path
 import pandas as pd
 from sklearn.cluster import KMeans
 
-from visualization.visualize_vs_mot import plot_vs_mot_scores
-
 
 def load_subject_scores(raw_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows, skipped = [], []
@@ -70,9 +68,7 @@ def run_vs_mot_kmeans(raw_dir: Path, output_dir: Path) -> dict[str, pd.DataFrame
     subject_path = output_dir / "vs_mot_subject_clusters.csv"
     summary_path = output_dir / "vs_mot_cluster_summary.csv"
     skipped_path = output_dir / "vs_mot_skipped_subjects.csv"
-    plot_path = output_dir / "vs_mot_scores.png"
 
-    plot_vs_mot_scores(combined, plot_path)
     combined.to_csv(subject_path, index=False)
     summary.to_csv(summary_path, index=False)
     skipped.to_csv(skipped_path, index=False)

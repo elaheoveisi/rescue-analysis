@@ -7,9 +7,6 @@ from features.gaze_entropy import run_entropy_grouped
 from features.general_gaze_features import build_features_dataset as build_general_gaze_features
 from features.victim_aoi import run_object_aoi
 from features.vs_mot_kmeans import run_vs_mot_kmeans
-from trigger.efficiency_trajectory import run_efficiency_trajectory_analysis
-from trigger.optimal_pickup import run_optimal_pickup_analysis
-from trigger.trust_trigger import run_lie_cycle_analysis
 from model.glmm import run_all as run_glmmsecond
 from model.help_vs_auto import build_features_dataset as build_help_vs_auto_features
 from model.help_vs_auto import run_models as run_help_vs_auto_models
@@ -60,21 +57,12 @@ with skip_run("skip", "mixed_effect_model") as check, check():
 with skip_run("skip", "power_analysis") as check, check():
     run_power_analysis(cfg)
 
-with skip_run("run", "general_gaze_features") as check, check():
+with skip_run("skip", "general_gaze_features") as check, check():
     build_general_gaze_features(cfg)
 
 # with skip_run("skip", "help_vs_auto_features") as check, check():
 #     build_help_vs_auto_features(cfg)
 
-with skip_run("skip" 
+with skip_run("run"
 "", "help_vs_auto_models") as check, check():
     run_help_vs_auto_models(cfg)
-
-with skip_run("skip", "trend_analysis") as check, check():
-    run_efficiency_trajectory_analysis(cfg)
-
-with skip_run("skip", "trigger_analysis") as check, check():
-    run_lie_cycle_analysis(cfg)
-
-with skip_run("skip", "optimal_pickup_analysis") as check, check():
-    run_optimal_pickup_analysis(cfg)

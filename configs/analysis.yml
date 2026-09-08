@@ -105,7 +105,7 @@ help_vs_auto:
       pupil_slope_per_s,
       gaze_dispersion_px,
       scanpath_length_rate_px_s,
-      blink_rate_hz,
+       blink_rate_hz,
 
       # -- AOI-based: which entropy_groups category (Victim/Hazard/Access/Interface) gaze moved between --
       #  aoi_transition_rate_hz,
