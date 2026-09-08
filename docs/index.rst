@@ -1,9 +1,9 @@
-.. TSA-SAR-mission documentation master file, created by
+.. rescue-analysis documentation master file, created by
    sphinx-quickstart.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-TSA-SAR-mission documentation!
+rescue-analysis documentation!
 ==============================================
 
 Contents:
