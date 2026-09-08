@@ -116,6 +116,9 @@ data/raw/*
 data/processed/*
 data/interim/*
 
+# Never commit CSV data (real or fake/scratch)
+*.csv
+
 
 
 .DS_Store
