@@ -1,0 +1,13 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.6 Chrome/144.0.7559.236 Electron/40.8.4 Safari/537.36" version="29.6.6">
+  <diagram name="Page-1" id="nEFKnUf1t_ijUnuIvySJ">
+    <mxGraphModel dx="1342" dy="690" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="300" pageHeight="200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="3uWxNKQgMG-fVfqC3D2h-2" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#EEE3BB;strokeColor=#987441;align=left;verticalAlign=top;spacingTop=-1;spacing=5;strokeWidth=2;arcSize=5;fontSize=15;spacingLeft=0;" value="You are a search-and-rescue coordinator giving calm, human-like radio guidance to the operator. Follow mission and environment rules: rescue all survivors, prioritize visible reachable survivors who are still saveable, nearest first, use matching keys for locked doors, unlocked doors can be opened, carry only one key, avoid lava, and never mention unreachable objects. &#xa;&#xa;Instructions must be directional and action-focused, always using North, South, East, West, with no coordinates, step counts, or visible reasoning.&#xa;&#xa; From the current state {obs}, choose one immediate objective by prioritizing the nearest reachable visible saveable survivor, then the next saveable survivor if relevant; otherwise choose the best remaining alive victim, then the nearest reachable survivor or key, or finally explore visible areas that may open a new path.&#xa;&#xa; Output either a sparse one-sentence instruction or a detailed 3–4 sentence radio briefing, always concise, natural, rule-compliant, and wrapped strictly as &#xa;&lt;START&gt; ... &lt;END&gt;." vertex="1">
+          <mxGeometry height="320" width="620" x="-160" y="20" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

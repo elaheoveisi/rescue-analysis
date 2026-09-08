@@ -1,0 +1,50 @@
+analysis:
+  offscreen_label: offscreen
+
+eyetracker:
+  pupil_col: pupil_diam
+  missing: 0.0
+
+game:
+  display: 1 # Display/monitor index (0 = primary, 1 = secondary, etc.)
+  fullscreen: True # Run the game and instruction windows in fullscreen
+
+vs:
+  width: 800
+  height: 600
+  fullscreen: true
+  screen: 1
+  rows: 4
+  cols: 4
+  total_trials: 5
+  fixation_time: 600 # (ms)
+  post_trial_pause: 2000 # (ms)
+  response_timeout: 3 # (s)
+  angles: [0, 90, 180, 270]
+  output_file: 'vs_results.csv'
+  background_color: [120, 120, 120] # gray
+  fixation_color: [0, 0, 0] # black
+
+surveys:
+  sart_save_path: 'sart_results.csv'
+  nasa_tlx_save_path: 'nasa_tlx_results.csv'
+  display: 0
+  fullscreen: true
+
+mot:
+  width: 800
+  height: 600
+  fullscreen: true
+  screen: 1
+  num_objects: 15
+  num_targets: 3
+  radius: 25
+  total_trials: 5
+  speed: 4.0
+  fixation_time: 1.0 # (s)
+  target_display_time: 2.0
+  trial_time: 6.0 # (s)
+  post_trial_pause: 2.0 # (s)
+  output_file: 'mot_results.csv'
+  background_color: [120, 120, 120] # gray
+  fixation_color: [0, 0, 0] # black

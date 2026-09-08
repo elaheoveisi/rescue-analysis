@@ -1,11 +1,10 @@
 from setuptools import find_packages, setup
 
-# ruff: noqa
 setup(
-    name='src',
+    name="src",
     packages=find_packages(),
-    version='0.1.0',
-    description='',
-    author='Your name (or your organization/company/team)',
-    license='MIT',
+    version="0.1.0",
+    description="A short description of the project.",
+    author="Elahe Oveisi",
+    license="",
 )

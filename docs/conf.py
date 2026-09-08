@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# rescue-analysis documentation build configuration file, created by
+# TSA-SAR-mission documentation build configuration file, created by
 # sphinx-quickstart.
 #
 # This file is execfile()d with the current directory set to its containing dir.
@@ -54,8 +54,8 @@ source_suffix = ".rst"
 master_doc = "index"
 
 # General information about the project.
-project = "rescue-analysis"
-author = "Your name (or your organization/company/team)"
+project = "TSA-SAR-mission"
+author = "Elahe Oveisi"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -177,7 +177,7 @@ html_last_updated_fmt = "%b %d, %Y"
 # html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = "rescue-analysisdoc"
+htmlhelp_basename = "TSA-SAR-missiondoc"
 
 # -- Options for LaTeX output --------------------------------------------------
 
@@ -195,9 +195,9 @@ latex_elements = {
 latex_documents = [
     (
         "index",
-        "rescue-analysis.tex",
-        "rescue-analysis Documentation",
-        "Your name (or your organization/company/team)",
+        "TSA-SAR-mission.tex",
+        "TSA-SAR-mission Documentation",
+        "Elahe Oveisi",
         "manual",
     ),
 ]
@@ -229,9 +229,9 @@ latex_documents = [
 man_pages = [
     (
         "index",
-        "rescue-analysis",
-        "rescue-analysis Documentation",
-        ["Your name (or your organization/company/team)"],
+        "TSA-SAR-mission",
+        "TSA-SAR-mission Documentation",
+        ["Elahe Oveisi"],
         1,
     )
 ]
@@ -247,11 +247,11 @@ man_pages = [
 texinfo_documents = [
     (
         "index",
-        "rescue-analysis",
-        "rescue-analysis Documentation",
-        "Your name (or your organization/company/team)",
-        "rescue-analysis",
-        "",
+        "TSA-SAR-mission",
+        "TSA-SAR-mission Documentation",
+        "Elahe Oveisi",
+        "TSA-SAR-mission",
+        "A short description of the project.",
         "Miscellaneous",
     ),
 ]

@@ -1,172 +1,136 @@
-# rescue-analysis
+<div align="center">
 
+# 🚁 Rescue-Grid
 
+### *Search. Navigate. Rescue.*
+
+A Search and Rescue simulation environment where every second counts!
+
+Built on top of [MiniGrid](https://github.com/Farama-Foundation/Minigrid) 🎮
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![MiniGrid](https://img.shields.io/badge/built%20on-MiniGrid-green.svg)](https://github.com/Farama-Foundation/Minigrid)
+
+</div>
 
 ---
 
-## 📁 Project Structure
+## 🎯 What is SAR-MiniGrid?
 
-```{=bash}
-├── src/
-│   ├── data/           # Data loading and saving scripts
-│   ├── dataset/        # Dataset preparation and loaders
-│   ├── features/       # Feature engineering
-│   ├── models/         # Model training and evaluation
-│   ├── visualization/  # Plots and visualizations
-│   └── **init**.py
-│
-├── configs/
-│   └── config.yml      # YAML configuration file
-│
-├── main.py             # Entry point
-├── utils.py            # Utility functions including skip_run context manager
-├── requirements.txt    # Project dependencies
-├── pyproject.toml      # Project and tool configuration
-├── .pre-commit-config.yaml
-├── README.md
-└── tests/              # Unit and integration tests
+Imagine a building on fire. Victims are trapped. Some rooms are locked. Lava (yes, lava!) blocks your path. Your mission? **Save everyone before time runs out.**
 
-```
+SAR-MiniGrid is a reinforcement learning environment that puts your agent in high-stakes rescue scenarios. Can your AI learn to be a hero?
 
----
+## ✨ Features
 
-## 🚀 Getting Started
+| Feature                    | Description                                               |
+| -------------------------- | --------------------------------------------------------- |
+| 🏢 **Multi-Room Layouts**   | Navigate through configurable grid-based buildings        |
+| 🎯 **Real vs Fake Victims** | Distinguish cross-shaped victims ✚ from T-shaped decoys ⊤ |
+| 🔥 **Lava Hazards**         | One wrong step and it's game over!                        |
+| 🔐 **Locked Rooms**         | Find keys to unlock doors and reach trapped victims       |
+| 🎮 **Interactive GUI**      | Beautiful Pygame interface with real-time info            |
+| 🤖 **RL-Ready**             | Gymnasium compatible for training your rescue agents      |
 
-### 1. Clone the repository
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
-git clone https://github.com/iHuman-Lab/rescue-analysis.git
-cd rescue-analysis
+# Clone the repository
+git clone https://github.com/yourusername/sar-minigrid.git
+cd sar-minigrid
+
+# Install dependencies
+pip install -r requirements.txt
+pip install minigrid pygame pygame_gui pyyaml
 ```
 
-### 2. Always use a conda virtual environment
+### Run Your First Rescue Mission
 
-```bash
-   conda activate myenv
+```python
+from game.sar.env import PickupVictimEnv
+from game.sar.utils import VictimPlacer
+from game.gui.main import SAREnvGUI
+
+# Set up the mission
+victim_placer = VictimPlacer(
+    num_fake_victims=5,    # 5 decoys to fool you
+    num_real_victims=3,    # 3 real victims to save
+    important_victim="down"
+)
+
+# Create the environment
+env = PickupVictimEnv(
+    num_rows=3,
+    num_cols=3,
+    screen_size=800,
+    render_mode="rgb_array",
+    agent_pov=True,        # First-person view 👀
+    add_lava=True,         # Danger mode: ON 🔥
+    lava_per_room=2,
+    locked_room_prob=0.5,  # 50% rooms are locked 🔐
+    tile_size=64,
+    victim_placer=victim_placer,
+)
+
+# Launch the mission!
+env.reset()
+gui = SAREnvGUI(env, fullscreen=False)
+gui.run()
 ```
-
-   *(Replace `myenv` and Python version as needed)*
-
----
-
-## 🛠️ Pre-commit Setup
-
-This project uses [pre-commit](https://pre-commit.com/) to automatically check your code before commits and pushes, ensuring consistent code quality and style.
-
-### How to install and enable pre-commit hooks:
-
-1. **Ayour conda environment**
-
-   ```bash
-   conda activate myenv
-   ```
-
-   *(Replace `myenv` and Python version as needed)*
-
-2. **Install `pre-commit` in your conda environment**
-
-   ```bash
-   conda install -c conda-forge pre-commit
-   ```
-
-   or if you prefer:
-
-   ```bash
-   pip install pre-commit
-   ```
-
-3. **Run pre-commit checks manually (optional)**
-
-   To manually run all pre-commit checks on all files:
-
-   ```bash
-   pre-commit run --all-files
-   ```
-
----
-
-### Notes:
-
-* Always activate your conda environment before running Git commands to ensure hooks work properly.
-* If you update `.pre-commit-config.yaml`, run `pre-commit install` again to update the hooks.
-* The `pre-push` hook will run all pre-commit checks before pushing. If any check fails, the push will be aborted.
-
-
-
----
 
 ## ⚙️ Configuration
 
-The project uses a YAML config file at `configs/config.yml`.
+| Parameter          | Description              | Default |
+| ------------------ | ------------------------ | ------- |
+| `num_rows`         | Building height (rooms)  | 3       |
+| `num_cols`         | Building width (rooms)   | 3       |
+| `room_size`        | Tiles per room           | 8       |
+| `add_lava`         | Enable lava hazards 🔥    | True    |
+| `lava_per_room`    | Lava tiles per room      | 0       |
+| `locked_room_prob` | Chance of locked doors 🔐 | 0.5     |
+| `agent_pov`        | First-person view 👁️      | False   |
 
-```python
-import yaml
+## 🎮 Controls
 
-with open("configs/config.yml") as f:
-    config = yaml.safe_load(f)
+| Key     | Action                       |
+| ------- | ---------------------------- |
+| ⬆️       | Move forward                 |
+| ⬅️ ➡️     | Rotate left/right            |
+| `Space` | Toggle/interact (open doors) |
+| `Tab`   | Pickup/rescue victim         |
+| `Shift` | Drop object                  |
+| `F11`   | Toggle fullscreen            |
+| `ESC`   | Quit mission                 |
+
+## 📁 Project Structure
+
+```
+src/
+├── game/
+│   ├── core/          # 🏗️ Base environment & level generation
+│   ├── gui/           # 🖼️ Pygame GUI components
+│   └── sar/           # 🚨 SAR-specific logic & objects
+├── main.py            # 🚀 Entry point
+└── utils.py           # 🔧 Utility functions
 ```
 
-Modify this file to adjust parameters, paths, and flags.
+## 🤝 Contributing
+
+Found a bug? Have an idea? PRs are welcome!
+
+## 📄 License
+
+MIT License - Feel free to use this for your research!
 
 ---
 
-## ⏯️ Conditional Execution with `skip_run`
+<div align="center">
 
-Use the `skip_run` context manager from `utils.py` to control which pipeline blocks run.
+**Built with ❤️ for the RL research community**
 
-Example from `main.py`:
+*Remember: In SAR-MiniGrid, heroes aren't born — they're trained!*
 
-```python
-from utils import skip_run
-
-with skip_run("skip", "Data") as check, check():
-    # This block will be skipped if flag is "skip"
-    ...
-```
-
-* Pass `"skip"` to skip blocks
-* Pass `"run"` (or anything else) to execute blocks
-
-The utility prints colored console messages indicating running/skipping status.
-
----
-
-## 🧹 Code Quality
-
-This project uses pre-commit hooks for automated linting and formatting:
-
-* `ruff` for linting and enforcing naming conventions
-* `codespell` for typo detection
-
-### Install pre-commit hooks
-
-```bash
-pre-commit install
-pre-commit run --all-files
-```
-
-
----
-
-## 📝 Running the Project
-
-Start the main pipeline:
-
-```bash
-python main.py
-```
-
----
-
-## 📜 License
-
-MIT License © Your name (or your organization/company/team)
-
----
-
-## 🙏 Acknowledgements
-
-Project scaffolded using a custom Cookiecutter template for Python data science projects.
-
+</div>
