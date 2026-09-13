@@ -44,6 +44,13 @@ def gte(matrix: pd.DataFrame) -> float | None:
         h_cond = -np.sum(p_cond * np.log2(p_cond + 1e-12), axis=1)
     p_i = row_totals.flatten() / row_totals.sum()
     return float(np.sum(p_i * h_cond))
+    """https://www.tandfonline.com/doi/epdf/10.1080/13658816.2024.2348747?needAccess=true 
+      n that study, participants had to choose a hospital under uncertainty
+        and time pressure. They reported strategies such as preferring straighter
+          roads versus denser road networks. The researchers then used GTE to 
+          test whether those different decision strategies were visible in their
+            eye movements. 
+      They found significant differences in GTE between the strategy groups  """
 
 
 def build_transition_matrix(labeled: pd.DataFrame, types: list) -> pd.DataFrame:

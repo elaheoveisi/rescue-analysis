@@ -50,30 +50,31 @@ def loso_predictions(
     """One leave-one-subject-out pass with the Random Forest.
 
     For each held-out subject: balance using only the remaining (training)
-    subjects, then test on the held-out subject's full, untouched data --
-    their rows are never balanced away. SHAP values for the held-out rows are
-    computed from that same fitted model, so they explain exactly the
-    predictions returned alongside them.
+    subjects, then test on the held-out subject's own data, also balanced
+    (downsampled to that subject's minority class count). SHAP values for the
+    held-out rows are computed from that same fitted model, so they explain
+    exactly the predictions returned alongside them.
     """
     y_true = {"rf": []}
     y_pred = {"rf": []}
     shap_rows = {"rf": []}
     for s in base["subject"].unique():
         train_raw, test_raw = base[base["subject"] != s], base[base["subject"] == s]
-        if test_raw.empty:
+        if test_raw.empty or test_raw["label"].nunique() < 2:
             continue
         train_bal = balanced_sample(train_raw, seed)
         if train_bal["label"].nunique() < 2:
             continue
+        test_bal = balanced_sample(test_raw, seed)
 
         rf = make_rf(hva_cfg)
         rf.fit(train_bal[features], train_bal["label"])
-        p = rf.predict_proba(test_raw[features])[:, 1]
-        y_true["rf"].extend(test_raw["label"].tolist())
+        p = rf.predict_proba(test_bal[features])[:, 1]
+        y_true["rf"].extend(test_bal["label"].tolist())
         y_pred["rf"].extend(p.tolist())
 
         explainer = shap.TreeExplainer(rf)
-        sv = explainer.shap_values(test_raw[features])
+        sv = explainer.shap_values(test_bal[features])
         if isinstance(sv, list):
             sv = sv[1]  # positive-class (label=1) SHAP values
         elif sv.ndim == 3:
@@ -120,9 +121,15 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
         scores = {"rf": []}
         cms = {"rf": np.zeros((2, 2), dtype=int)}
         shap_pool = {"rf": []}
+        n_test_after_balancing = None
         for r in range(n_repeats):
             preds = loso_predictions(base, features, hva_cfg, seed0 + r)
             for model_name, (yt, yp, sv) in preds.items():
+                if n_test_after_balancing is None:
+                    # Balanced test size is fixed per fold (each held-out subject's own
+                    # minority class count x2), so it doesn't vary across repeats --
+                    # only which rows get sampled does. Pooled across all LOSO folds.
+                    n_test_after_balancing = len(yt)
                 scores[model_name].append(score(yt, yp, threshold))
                 if len(set(yt)) >= 2:
                     pred = (np.array(yp) >= threshold).astype(int)
@@ -143,7 +150,11 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
         # Confusion-matrix counts (below) are summed across all n_repeats repeats, so
         # tn/fp/fn/tp are ~n_repeats x the number of held-out decisions, not per-repeat counts.
         # recall_alt/precision_alt/specificity_auto are ratios, so they're unaffected by the scaling.
-        row = {"window_s": w, "minority_class_n_full_data": base["label"].value_counts().min()}
+        row = {
+            "window_s": w,
+            "minority_class_n_full_data": base["label"].value_counts().min(),
+            "n_test_after_balancing": n_test_after_balancing,
+        }
         for model_name, sc in scores.items():
             for metric in ("auc", "accuracy", "precision", "recall", "f1"):
                 vals = [d[metric] for d in sc if d[metric] is not None]

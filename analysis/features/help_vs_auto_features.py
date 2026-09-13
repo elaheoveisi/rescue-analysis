@@ -57,11 +57,15 @@ def event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFrame
     return events.sort_values("timestamp").reset_index(drop=True)
 
 
-def build_events(cfg: dict) -> pd.DataFrame:
+def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
+    """Shared event/window-label loop behind build_events() and
+    model.help_vs_auto_stepwin.build_events_steps() -- the two only differ in
+    how a window's start (`lo`, in ms) is derived from `w`, which is up to
+    `get_lo(step_ts, eye_min, event_rel_ms, event_step, w) -> lo`.
+    """
     hva_cfg = cfg["help_vs_auto"]
     exclude = set(hva_cfg.get("exclude_participants", []))
     llm_trials = hva_cfg.get("llm_trials", ["gemini", "openai"])  # pooled, not split
-    windows = hva_cfg.get("windows_s", [5, 10, 15, 20])
     min_fix = hva_cfg.get("min_fixations", 2)
     auto_interval_steps = hva_cfg["auto_interval_steps"]
 
@@ -94,11 +98,16 @@ def build_events(cfg: dict) -> pd.DataFrame:
             eye = store[ek]
             eye_min = pd.to_numeric(eye["timestamp"], errors="coerce").min()
 
+            game = game.copy()
+            game["timestamp"] = pd.to_numeric(game["timestamp"], errors="coerce")
+            game["step_count"] = pd.to_numeric(game["step_count"], errors="coerce")
+            step_ts = game.groupby("step_count")["timestamp"].min().sort_index()
+
             events = event_timeline(game, auto_interval_steps)
             for _, ev in events.iterrows():
                 event_rel_ms = (ev["timestamp"] - eye_min) * 1000.0
                 for w in windows:
-                    lo = event_rel_ms - w * 1000.0
+                    lo = get_lo(step_ts, eye_min, event_rel_ms, ev["step"], w)
                     sub_fix_win = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
                     win_fix = sub_fix_win[sub_fix_win["obj_type_grouped"].isin(gte_types)]
                     n_fix = len(win_fix)
@@ -117,6 +126,14 @@ def build_events(cfg: dict) -> pd.DataFrame:
                     })
 
     return pd.DataFrame(rows)
+
+
+def build_events(cfg: dict) -> pd.DataFrame:
+    windows = cfg["help_vs_auto"].get("windows_s", [5, 10, 15, 20])
+    return build_events_core(
+        cfg, windows,
+        get_lo=lambda step_ts, eye_min, event_rel_ms, event_step, w: event_rel_ms - w * 1000.0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +509,13 @@ def window_features(
     }
 
 
-def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
+def build_features_core(cfg: dict, events_df: pd.DataFrame, compute_window) -> pd.DataFrame:
+    """Shared per-event feature-window loop behind build_features() and
+    model.help_vs_auto_stepwin.build_features_steps() -- the two only differ
+    in how a row's (lo, event_rel_ms, window-features-w-arg) triple is
+    derived, which is up to `compute_window(step_ts, eye_min, step, w) ->
+    (lo, event_rel_ms, w_arg) | None` (None skips the row).
+    """
     processed = Path(cfg["paths"]["processed"])
     groups = cfg["entropy_groups"]
     group_names = list(groups.keys())
@@ -527,13 +550,14 @@ def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
                 else pd.DataFrame(columns=["start_ms", "end_ms", "duration_ms", "amplitude"])
             )
 
-            step_ts = game.groupby("step_count")["timestamp"].min()
+            step_ts = game.groupby("step_count")["timestamp"].min().sort_index()
 
             for _, ev in sub_events.iterrows():
                 step, label, w = ev["step"], ev["label"], ev["window"]
-                ts = step_ts.get(step)
-                event_rel_ms = (ts - eye_min) * 1000.0
-                lo = event_rel_ms - w * 1000.0
+                window = compute_window(step_ts, eye_min, step, w)
+                if window is None:
+                    continue
+                lo, event_rel_ms, w_arg = window
 
                 wf = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
                 ws = window_slice(sacc, "start_ms", lo, event_rel_ms)
@@ -542,7 +566,17 @@ def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
                 rows.append({
                     "subject": sid, "trial": trial, "run": run_num,
                     "step": int(step), "label": int(label), "window": w,
-                    **window_features(cfg, wf, ws, we, lo, w, group_names),
+                    **window_features(cfg, wf, ws, we, lo, w_arg, group_names),
                 })
 
     return pd.DataFrame(rows)
+
+
+def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
+    def compute_window(step_ts, eye_min, step, w):
+        ts = step_ts.get(step)
+        event_rel_ms = (ts - eye_min) * 1000.0
+        lo = event_rel_ms - w * 1000.0
+        return lo, event_rel_ms, w
+
+    return build_features_core(cfg, events_df, compute_window)

@@ -10,6 +10,7 @@ from features.vs_mot_kmeans import run_vs_mot_kmeans
 from model.glmm import run_all as run_glmmsecond
 from model.help_vs_auto import build_features_dataset as build_help_vs_auto_features
 from model.help_vs_auto import run_models as run_help_vs_auto_models
+from model.help_vs_auto_stepwin import run as run_help_vs_auto_stepwin
 from model.power_analysis import run as run_power_analysis
 from prepare_data.data import split_all_data_by_trial
 from utils import skip_run
@@ -60,9 +61,12 @@ with skip_run("skip", "power_analysis") as check, check():
 with skip_run("skip", "general_gaze_features") as check, check():
     build_general_gaze_features(cfg)
 
-# with skip_run("skip", "help_vs_auto_features") as check, check():
-#     build_help_vs_auto_features(cfg)
+with skip_run("skip", "help_vs_auto_features") as check, check():
+    build_help_vs_auto_features(cfg)
 
-with skip_run("run"
-"", "help_vs_auto_models") as check, check():
+with skip_run("skip", "help_vs_auto_models") as check, check():
     run_help_vs_auto_models(cfg)
+
+with skip_run("run", "help_vs_auto_stepwin") as check, check():
+    run_help_vs_auto_stepwin(cfg)
+
