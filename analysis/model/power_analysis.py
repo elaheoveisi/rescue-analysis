@@ -1,11 +1,9 @@
-"""Power analysis for SGE/GTE, built on victim_aoi's existing best-run selection.
+"""Power analysis for SGE/GTE, built on victim_aoi's per-run output.
 
 Participants and expertise come from configs/analysis.yml. SGE/GTE per participant x
-trial are computed by features.victim_aoi.run_object_aoi() (unchanged) -- the same
-best-run selection (cfg["glmm2"]["best_run_metric"], default saved_victims) already
-used everywhere else in the pipeline. Condition (no_llm/llm) and expertise are
-attached, then a paired-samples power analysis (Cohen's dz + two-sided TTestPower) is
-run on llm vs no_llm.
+trial x run are computed by features.victim_aoi.run_object_aoi() (unchanged, all runs
+included). Condition (no_llm/llm) and expertise are attached, then a paired-samples
+power analysis (Cohen's dz + two-sided TTestPower) is run on llm vs no_llm.
 """
 
 from __future__ import annotations
@@ -34,7 +32,7 @@ def load_participants(cfg: dict) -> tuple[list[str], dict[str, str]]:
 
 
 def build_entropy_dataset(cfg: dict) -> pd.DataFrame:
-    """SGE/GTE per participant x trial, using victim_aoi's existing best-run selection."""
+    """SGE/GTE per participant x trial x run, from all of victim_aoi's runs."""
     feat_df, _ = run_object_aoi(cfg)
     _, expertise_map = load_participants(cfg)
     condition_map = cfg.get("analysis", {}).get("condition_by_category", {})

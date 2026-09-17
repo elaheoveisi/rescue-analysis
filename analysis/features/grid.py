@@ -81,35 +81,3 @@ def extract_run_grid(game_stream: dict, game_df: pd.DataFrame) -> dict | None:
         if "grid" in d:
             last_grid = {"grid": d["grid"], "victim_health": d.get("victim_health", {})}
     return last_grid
-
-
-def best_runs(
-    store: pd.HDFStore, trials_cfg: list[str], cfg: dict
-) -> set[tuple[str, str, int]]:
-    """Return {(sid, trial, run_num)} keeping only the highest-metric run per subject/trial.
-
-    Metric is cfg["glmm2"]["best_run_metric"] (default: "saved_victims").
-    """
-    metric = cfg.get("glmm2", {}).get("best_run_metric", "saved_victims")
-    return set(
-        pd.DataFrame(
-            [
-                {
-                    "sid": p[0],
-                    "trial": next((t for t in trials_cfg if t in p[1]), None),
-                    "run": int(p[2].replace("run_", "")),
-                    metric: float(store[k][metric].max())
-                    if metric in store[k].columns
-                    else 0.0,
-                }
-                for k in store.keys()
-                if k.endswith("/game")
-                for p in [k.strip("/").split("/")]
-            ]
-        )
-        .dropna(subset=["trial"])
-        .sort_values(metric, ascending=False)
-        .groupby(["sid", "trial"], as_index=False)
-        .first()[["sid", "trial", "run"]]
-        .itertuples(index=False, name=None)
-    )

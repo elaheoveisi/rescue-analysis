@@ -84,7 +84,7 @@ help_vs_auto:
     [
       # -- not AOI-based: pure eye-movement kinematics, independent of what was being looked at --
       # sge, 
-      gte,
+      # gte,
       fixation_rate_hz,
       mean_fixation_dur_ms,
       # max_fixation_dur_ms,
@@ -122,7 +122,6 @@ xdf:
 
 glmm2:
   output_file: glmm2_results.csv
-  best_run_metric: saved_victims
   continuous: [
       victims_per_step,
       total_reward,

@@ -55,12 +55,6 @@ def run_all(cfg: dict, dataframes: dict) -> pd.DataFrame:
         if df.empty:
             continue
 
-        metric = cfg.get("glmm2", {}).get("best_run_metric", "saved_victims")
-        df = (
-            df.sort_values(metric, ascending=False)
-            .groupby(["participant", "trial"], as_index=False)
-            .first()
-        )
         df = df.rename(columns={"trial": "category"})
         df["condition"] = df["category"].map(condition_map).fillna("unknown")
         df["condition"] = pd.Categorical(df["condition"], categories=["no_llm", "llm"])

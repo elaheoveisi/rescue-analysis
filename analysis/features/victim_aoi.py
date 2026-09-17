@@ -13,7 +13,7 @@ from features.aoi_fixation import DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
 from features.aoi_fixation import label_fixations
 from features.eye_tracking_features import run_eyetracking
 from features.gaze_entropy import build_transition_matrix, gte, regroup_obj_type, sge
-from features.grid import best_runs, cam_bounds, extract_run_states
+from features.grid import cam_bounds, extract_run_states
 from prepare_data.parse import get_stream, xdf_path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -212,7 +212,6 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     feat_rows, trans_rows, fix_rows = [], [], []
 
     with pd.HDFStore(str(h5_path), mode="r") as store:
-        best_runs_set = best_runs(store, trials_cfg, cfg)
         for sid in [str(s) for s in cfg.get("sub", [])]:
             print(f"Processing {sid}")
             try:
@@ -240,9 +239,6 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
 
                 trial_match = next((t for t in trials_cfg if t in trial_h5), None)
                 if trial_match is None:
-                    continue
-
-                if (sid, trial_match, run_num) not in best_runs_set:
                     continue
 
                 eye_df = store[eye_key]

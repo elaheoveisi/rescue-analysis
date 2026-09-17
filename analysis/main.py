@@ -14,7 +14,7 @@ from model.help_vs_auto_stepwin import run as run_help_vs_auto_stepwin
 from model.power_analysis import run as run_power_analysis
 from prepare_data.data import split_all_data_by_trial
 from utils import skip_run
-from validate_aoi_fixations import run_validation
+# from validate_aoi_fixations import run_validation
 
 with open("configs/analysis.yml") as f:
     cfg = yaml.safe_load(f)
@@ -37,8 +37,8 @@ with skip_run("skip", "extract_features") as check, check():
 with skip_run("skip", "victim_aoi") as check, check():
     run_object_aoi(cfg)
 
-with skip_run("skip", "validate_victim_aoi") as check, check():
-    run_validation(cfg)
+# with skip_run("skip", "validate_victim_aoi") as check, check():
+#     run_validation(cfg)
 
 with skip_run("skip", "gaze_entropy") as check, check():
     run_entropy_grouped(cfg)
