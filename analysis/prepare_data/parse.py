@@ -33,8 +33,10 @@ def extract_grids(
     result: dict = {}
     for v in game_stream["time_series"]:
         try:
-            d = json.loads(v[0] if isinstance(v, (list, tuple)) else v)
+            d = json.loads(v[0] if isinstance(v, (list, tuple, np.ndarray)) else v)
         except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(d, dict):
             continue
         tid = d.get(trial_field)
         if not tid or tid in result or "grid" not in d:
@@ -58,15 +60,17 @@ def parse_game(stream: dict, tfield: str) -> dict[str, list[dict]]:
     trial_rows: dict[str, list[dict]] = {}
     for ts, v in zip(stream["time_stamps"], stream["time_series"]):
         try:
-            d = json.loads(v[0] if isinstance(v, (list, tuple)) else v)
+            d = json.loads(v[0] if isinstance(v, (list, tuple, np.ndarray)) else v)
         except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(d, dict):
             continue
         tid = d.get(tfield)
         if tid is not None:
             trial_rows.setdefault(tid, []).append(
                 {
-                    "timestamp": ts,
                     **{k: w for k, w in d.items() if not isinstance(w, (dict, list))},
+                    "timestamp": ts,
                 }
             )
     return trial_rows
@@ -112,27 +116,24 @@ def split_streams_by_trial(
 
     result: dict[str, dict[int, dict[str, pd.DataFrame]]] = {}
     for tid, rows in trials.items():
-        end_positions = sorted(
-            set(
-                [
-                    i
-                    for i, row in enumerate(rows)
-                    if any(row.get(col) for col in end_fields)
-                ]
-                + [
-                    i
-                    for i in range(1, len(rows))
-                    if (rows[i].get("step_count", 1) or 1)
-                    < (rows[i - 1].get("step_count", 0) or 0)
-                ]
-            )
-        )
-        starts = [0] + [p + 1 for p in end_positions]
-        ends = [p + 1 for p in end_positions] + [len(rows)]
+        rows.sort(key=lambda row: row["timestamp"])
+        boundaries = {0, len(rows)}
+        previous_step = None
+        terminal = False
+        for i, row in enumerate(rows):
+            ended = any(row.get(col) in (True, 1, "true", "True") for col in end_fields)
+            step = pd.to_numeric(row.get("step_count"), errors="coerce")
+            reset = pd.notna(step) and previous_step is not None and step < previous_step
+            if i and (reset or (terminal and not ended)):
+                boundaries.add(i)
+            if pd.notna(step):
+                previous_step = step
+            terminal = ended
+        bounds = sorted(boundaries)
 
         runs: dict[int, dict[str, pd.DataFrame]] = {}
         run_num = 1
-        for s, e in zip(starts, ends):
+        for s, e in zip(bounds, bounds[1:]):
             if s >= e:
                 continue
             slc = pd.DataFrame(rows[s:e])

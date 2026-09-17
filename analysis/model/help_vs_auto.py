@@ -60,7 +60,7 @@ def loso_predictions(
     shap_rows = {"rf": []}
     for s in base["subject"].unique():
         train_raw, test_raw = base[base["subject"] != s], base[base["subject"] == s]
-        if test_raw.empty or test_raw["label"].nunique() < 2:
+        if test_raw.empty or test_raw["label"].nunique() < 2 or train_raw["label"].nunique() < 2:
             continue
         train_bal = balanced_sample(train_raw, seed)
         if train_bal["label"].nunique() < 2:
@@ -104,6 +104,8 @@ def run_classifiers(cfg: dict, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataF
     each repeat's numbers. That matches "decision" as the modeling unit, but
     should be stated in the methods write-up.
     """
+    if "event_timestamp" not in df or df["event_timestamp"].isna().any():
+        raise ValueError("Stale event features: rebuild using corrected request timestamps before training.")
     hva_cfg = cfg["help_vs_auto"]
     features = hva_cfg["features"]
     n_repeats = hva_cfg.get("n_balance_repeats", 10)
@@ -193,7 +195,7 @@ def build_features_dataset(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     print(f"Saved {len(events_df)} rows -> {events_out}")
 
     features_df = events_df.merge(
-        build_features(cfg, events_df), on=["subject", "trial", "run", "step", "label", "window"], how="left"
+        build_features(cfg, events_df), on=["subject", "trial", "run", "step", "label", "window", "event_timestamp"], how="left"
     )
     features_out = processed / hva_cfg.get("features_file", "help_vs_auto_features.csv")
     features_df.to_csv(features_out, index=False)

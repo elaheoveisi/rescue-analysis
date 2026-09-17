@@ -10,51 +10,9 @@ from features.eye_tracking_features import build_eye_features
 from features.gaze_entropy import build_transition_matrix, gte as compute_gte, regroup_obj_type, sge as compute_sge
 
 
-def window_slice(df: pd.DataFrame, ts_col: str, lo: float, hi: float) -> pd.DataFrame:
-    """Rows of df whose ts_col falls in [lo, hi)."""
-    return df[(df[ts_col] >= lo) & (df[ts_col] < hi)]
-
-
-# ---------------------------------------------------------------------------
-# 1. Event timeline
-# ---------------------------------------------------------------------------
-
-def first_timestamp_per_step(game: pd.DataFrame, mask: pd.Series) -> pd.Series:
-    """One timestamp per step_count among the rows where `mask` is True.
-
-    The game log has one row per eye-tracker sample, not one row per game step,
-    so a single step (or a single held-down key press) spans many rows -- this
-    collapses that back down to one event per step.
-    """
-    return game.loc[mask].dropna(subset=["step_count"]).groupby("step_count")["timestamp"].min()
-
-
-def event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFrame:
-    """One row per event (step, label, timestamp), chronological.
-
-    label: 1 = manual alt-press, 0 = automatic recommendation every
-    `auto_interval_steps` game steps.
-    """
-    game = game.copy()
-    game["timestamp"] = pd.to_numeric(game["timestamp"], errors="coerce")
-    game["step_count"] = pd.to_numeric(game["step_count"], errors="coerce")
-
-    manual_steps = first_timestamp_per_step(game, game["alt_pressed"] == True)
-
-    max_step = game["step_count"].max()
-    auto_candidates = np.arange(
-        auto_interval_steps, (max_step // auto_interval_steps + 1) * auto_interval_steps, auto_interval_steps
-    )
-    auto_mask = game["step_count"].isin(auto_candidates) & ~game["step_count"].isin(manual_steps.index)
-    auto_steps = first_timestamp_per_step(game, auto_mask)
-
-    events = pd.DataFrame(
-        [{"step": int(s), "timestamp": t, "label": 1} for s, t in manual_steps.items()]
-        + [{"step": int(s), "timestamp": t, "label": 0} for s, t in auto_steps.items()]
-    )
-    if events.empty:
-        return events
-    return events.sort_values("timestamp").reset_index(drop=True)
+from features.game_steps import (
+    EVENT_KEYS, action_timestamps, trial_event_timeline, validate_eye_origin, window_slice,
+)
 
 
 def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
@@ -77,6 +35,7 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
     fix_all["obj_type_grouped"] = fix_all["obj_type"].apply(lambda t: regroup_obj_type(t, groups))
 
     rows = []
+    timelines = {}
     with pd.HDFStore(str(processed / "data.h5"), mode="r") as store:
         keys = store.keys()
         for gk in [k for k in keys if k.endswith("/game")]:
@@ -96,18 +55,27 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
 
             game = store[gk]
             eye = store[ek]
+            if game.empty or eye.empty:
+                continue
             eye_min = pd.to_numeric(eye["timestamp"], errors="coerce").min()
 
             game = game.copy()
             game["timestamp"] = pd.to_numeric(game["timestamp"], errors="coerce")
             game["step_count"] = pd.to_numeric(game["step_count"], errors="coerce")
-            step_ts = game.groupby("step_count")["timestamp"].min().sort_index()
+            validate_eye_origin(sub_fix, eye_min)
+            step_ts = action_timestamps(game)
 
-            events = event_timeline(game, auto_interval_steps)
+            trial_key = (sid, trial)
+            if trial_key not in timelines:
+                timelines[trial_key] = trial_event_timeline(store, gk, auto_interval_steps)
+            timeline = timelines[trial_key]
+            events = timeline[timeline["timestamp"].between(game["timestamp"].min(), game["timestamp"].max())]
             for _, ev in events.iterrows():
                 event_rel_ms = (ev["timestamp"] - eye_min) * 1000.0
                 for w in windows:
                     lo = get_lo(step_ts, eye_min, event_rel_ms, ev["step"], w)
+                    if not np.isfinite(lo) or lo < 0 or lo >= event_rel_ms:
+                        continue
                     sub_fix_win = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
                     win_fix = sub_fix_win[sub_fix_win["obj_type_grouped"].isin(gte_types)]
                     n_fix = len(win_fix)
@@ -122,10 +90,11 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
                     rows.append({
                         "subject": sid, "trial": trial, "run": run_num,
                         "step": int(ev["step"]), "label": int(ev["label"]), "window": w,
+                        "event_timestamp": float(ev["timestamp"]), "event_basis": ev["event_basis"],
                         "sge": sge, "gte": gte,
                     })
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows) if rows else pd.DataFrame(columns=EVENT_KEYS)
 
 
 def build_events(cfg: dict) -> pd.DataFrame:
@@ -410,7 +379,7 @@ def pupil_trend(we: pd.DataFrame, lo: float, missing: float = 0.0) -> dict:
         return {"mean_pupil_diameter": np.nan, "peak_pupil_diameter": np.nan, "pupil_slope_per_s": np.nan}
     mean_pupil_diameter = pupil.mean()
     peak_pupil_diameter = pupil.max()
-    if len(pupil) > 1:
+    if len(pupil) > 1 and we.loc[pupil.index, "rel_ms"].nunique() > 1:
         t_s = (we.loc[pupil.index, "rel_ms"] - lo) / 1000.0
         pupil_slope_per_s = float(np.polyfit(t_s, pupil, 1)[0])
     else:
@@ -430,7 +399,7 @@ def blink_rate(we: pd.DataFrame, w: int) -> float:
     if we.empty:
         return np.nan
     valid = (we["eye_validities"] == 3).to_numpy()
-    prev_valid = np.concatenate(([True], valid[:-1]))  # window boundary assumed valid
+    prev_valid = np.concatenate(([valid[0]], valid[:-1]))  # first sample has no observed predecessor
     n_onsets = int((prev_valid & ~valid).sum())
     return n_onsets / w
 
@@ -513,7 +482,7 @@ def build_features_core(cfg: dict, events_df: pd.DataFrame, compute_window) -> p
     """Shared per-event feature-window loop behind build_features() and
     model.help_vs_auto_stepwin.build_features_steps() -- the two only differ
     in how a row's (lo, event_rel_ms, window-features-w-arg) triple is
-    derived, which is up to `compute_window(step_ts, eye_min, step, w) ->
+    derived, which is up to `compute_window(step_ts, eye_min, step, w, event_ts) ->
     (lo, event_rel_ms, w_arg) | None` (None skips the row).
     """
     processed = Path(cfg["paths"]["processed"])
@@ -535,6 +504,8 @@ def build_features_core(cfg: dict, events_df: pd.DataFrame, compute_window) -> p
             game["timestamp"] = pd.to_numeric(game["timestamp"], errors="coerce")
             game["step_count"] = pd.to_numeric(game["step_count"], errors="coerce")
             eye = store[ek].copy()
+            if game.empty or eye.empty:
+                continue
             eye["timestamp"] = pd.to_numeric(eye["timestamp"], errors="coerce")
             eye_min = eye["timestamp"].min()
             eye["rel_ms"] = (eye["timestamp"] - eye_min) * 1000.0
@@ -544,20 +515,22 @@ def build_features_core(cfg: dict, events_df: pd.DataFrame, compute_window) -> p
             ].sort_values("start_ms")
 
             sacc_path = processed / sid / trial / f"run_{run_num}_saccades.csv"
-            sacc = (
-                pd.read_csv(sacc_path)
-                if sacc_path.exists()
-                else pd.DataFrame(columns=["start_ms", "end_ms", "duration_ms", "amplitude"])
-            )
+            if not sacc_path.exists():
+                raise FileNotFoundError(f"Missing {sacc_path}; rerun extract_features.")
+            sacc = pd.read_csv(sacc_path)
 
-            step_ts = game.groupby("step_count")["timestamp"].min().sort_index()
+            validate_eye_origin(sub_fix, eye_min)
+            validate_eye_origin(sacc, eye_min)
+            step_ts = action_timestamps(game)
 
             for _, ev in sub_events.iterrows():
                 step, label, w = ev["step"], ev["label"], ev["window"]
-                window = compute_window(step_ts, eye_min, step, w)
+                window = compute_window(step_ts, eye_min, step, w, ev["event_timestamp"])
                 if window is None:
                     continue
                 lo, event_rel_ms, w_arg = window
+                if not np.isfinite(lo) or lo < 0 or lo >= event_rel_ms:
+                    continue
 
                 wf = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
                 ws = window_slice(sacc, "start_ms", lo, event_rel_ms)
@@ -566,15 +539,15 @@ def build_features_core(cfg: dict, events_df: pd.DataFrame, compute_window) -> p
                 rows.append({
                     "subject": sid, "trial": trial, "run": run_num,
                     "step": int(step), "label": int(label), "window": w,
+                    "event_timestamp": float(ev["event_timestamp"]),
                     **window_features(cfg, wf, ws, we, lo, w_arg, group_names),
                 })
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows) if rows else pd.DataFrame(columns=EVENT_KEYS)
 
 
 def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
-    def compute_window(step_ts, eye_min, step, w):
-        ts = step_ts.get(step)
+    def compute_window(step_ts, eye_min, step, w, ts):
         event_rel_ms = (ts - eye_min) * 1000.0
         lo = event_rel_ms - w * 1000.0
         return lo, event_rel_ms, w

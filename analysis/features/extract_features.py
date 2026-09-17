@@ -49,6 +49,8 @@ def extract_features(cfg: dict) -> pd.DataFrame:
                 game_data = streams["game"]
                 eye_data = streams["eye_tracking"]
 
+                if game_data.empty or eye_data.empty or not game_data["action"].notna().any():
+                    continue
                 et = run_eyetracking(eye_data, cfg)
                 aoi = run_aoi(et["fixations"], aois)
 
@@ -79,6 +81,8 @@ def extract_features(cfg: dict) -> pd.DataFrame:
 
                 csv_dir = processed_dir / sub / trial_id
                 csv_dir.mkdir(parents=True, exist_ok=True)
+                for event_frame in et.values():
+                    event_frame["eye_origin_timestamp"] = float(eye_data["timestamp"].iloc[0])
                 et["fixations"].to_csv(
                     csv_dir / f"run_{run_num}_fixations.csv", index=False
                 )

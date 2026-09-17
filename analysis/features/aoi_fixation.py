@@ -8,8 +8,8 @@ def label_fixations(fix_df: pd.DataFrame, aois: list[dict]) -> pd.DataFrame:
     df = fix_df.copy()
     df["aoi"] = DEFAULT_OFFSCREEN_LABEL
     for aoi in aois:
-        mask = df["x"].between(aoi["x_min"], aoi["x_max"]) & df["y"].between(
-            aoi["y_min"], aoi["y_max"]
+        mask = df["x"].between(aoi["x_min"], aoi["x_max"], inclusive="left") & df["y"].between(
+            aoi["y_min"], aoi["y_max"], inclusive="left"
         )
         df.loc[mask, "aoi"] = aoi["name"]
     return df

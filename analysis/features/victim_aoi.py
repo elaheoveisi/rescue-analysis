@@ -13,7 +13,7 @@ from features.aoi_fixation import DEFAULT_OFFSCREEN_LABEL as _OFFSCREEN
 from features.aoi_fixation import label_fixations
 from features.eye_tracking_features import run_eyetracking
 from features.gaze_entropy import build_transition_matrix, gte, regroup_obj_type, sge
-from features.grid import best_runs, cam_bounds, extract_run_grid
+from features.grid import best_runs, cam_bounds, extract_run_states
 from prepare_data.parse import get_stream, xdf_path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -77,7 +77,6 @@ def label_fixations_dynamic(
     fix_df: pd.DataFrame,
     game_df: pd.DataFrame,
     eye_df: pd.DataFrame,
-    grid: list[list[int]],
     game_aoi: dict,
     panel_aois: list[dict],
     tile_aois: list[dict],
@@ -96,6 +95,9 @@ def label_fixations_dynamic(
     df["obj_type"] = pd.Series(dtype=str)
     df["grid_x"] = np.nan
     df["grid_y"] = np.nan
+    df["grid_state_timestamp"] = np.nan
+    df["tile_id"] = np.nan
+    df["eye_origin_timestamp"] = float(eye_df["timestamp"].iloc[0])
     df["tile_pixel_x_min"] = np.nan
     df["tile_pixel_x_max"] = np.nan
     df["tile_pixel_y_min"] = np.nan
@@ -105,31 +107,40 @@ def label_fixations_dynamic(
     tile_labeler = _build_tile_labeler(tile_aois)
     aoi_to_type = _make_aoi_to_type(panel_names, _object_types(tile_aois))
 
+    if "grid" not in game_df:
+        raise ValueError("AOI labels require raw timestamped grid snapshots")
+    game_df = game_df.sort_values("timestamp", kind="stable").reset_index(drop=True)
     # Pre-compute the game frame index that aligns with each fixation onset.
     t0_xdf = float(eye_df["timestamp"].iloc[0])
     game_ts = game_df["timestamp"].values.astype(float)
     fix_xdf = t0_xdf + df["start_ms"].values.astype(float) / 1000.0
-    frame_idx = np.clip(np.searchsorted(game_ts, fix_xdf), 0, len(game_ts) - 1)
+    frame_idx = np.searchsorted(game_ts, fix_xdf, side="right") - 1
 
     sx0, sx1 = float(game_aoi["x_min"]), float(game_aoi["x_max"])
     sy0, sy1 = float(game_aoi["y_min"]), float(game_aoi["y_max"])
-    grid_h, grid_w = len(grid), len(grid[0]) if grid else 0
 
     # Step 2 — dynamic grid mapping for fixations not claimed by a panel AOI.
     for i, (row_idx, row) in enumerate(df.iterrows()):
         if row["aoi"] != _OFFSCREEN:
             continue  # already labeled by a static panel
 
+        if frame_idx[i] < 0:
+            continue
         px, py = float(row["x"]), float(row["y"])
-        if sx0 <= px <= sx1 and sy0 <= py <= sy1:
-            cx0, cy0, cx1, cy1 = cam_bounds(game_df.iloc[int(frame_idx[i])])
+        if sx0 <= px < sx1 and sy0 <= py < sy1:
+            state = game_df.iloc[int(frame_idx[i])]
+            grid = np.asarray(state["grid"])
+            grid_h, grid_w = grid.shape
+            cx0, cy0, cx1, cy1 = cam_bounds(state)
             vw, vh = cx1 - cx0, cy1 - cy0
             if vw > 0 and vh > 0:
                 gx = cx0 + int((px - sx0) / ((sx1 - sx0) / vw))
                 gy = cy0 + int((py - sy0) / ((sy1 - sy0) / vh))
-                gx = max(0, min(gx, grid_w - 1))
-                gy = max(0, min(gy, grid_h - 1))
+                if not (0 <= gx < grid_w and 0 <= gy < grid_h):
+                    continue
                 df.at[row_idx, "aoi"] = tile_labeler(int(grid[gy][gx]), gx, gy)
+                df.at[row_idx, "grid_state_timestamp"] = float(state["timestamp"])
+                df.at[row_idx, "tile_id"] = int(grid[gy][gx])
                 df.at[row_idx, "grid_x"] = gx
                 df.at[row_idx, "grid_y"] = gy
                 tile_pw = (sx1 - sx0) / vw
@@ -237,8 +248,10 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 eye_df = store[eye_key]
                 game_df = store[game_key]
 
-                grid_info = extract_run_grid(game_stream, game_df)
-                if grid_info is None:
+                if game_df.empty or eye_df.empty or not game_df["action"].notna().any():
+                    continue
+                grid_states = extract_run_states(game_stream, game_df, cfg["xdf"]["trial_field"])
+                if grid_states.empty:
                     print(f"  No grid for {sid}/{trial_match}, skipping")
                     continue
                 fix_df = run_eyetracking(eye_df, cfg)["fixations"]
@@ -250,9 +263,8 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
 
                 labeled = label_fixations_dynamic(
                     fix_df,
-                    game_df,
+                    grid_states,
                     eye_df,
-                    grid_info["grid"],
                     game_aoi,
                     panel_aois,
                     tile_aois,
@@ -282,8 +294,8 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 grid_dir.mkdir(exist_ok=True)
                 grid_stem = f"grid_{sid}_{trial_match}"
                 with open(grid_dir / f"{grid_stem}.json", "w") as _f:
-                    json.dump(grid_info["grid"], _f)
-                pd.DataFrame(grid_info["grid"]).to_csv(
+                    json.dump(grid_states.iloc[0]["grid"].tolist(), _f)
+                pd.DataFrame(grid_states.iloc[0]["grid"]).to_csv(
                     grid_dir / f"{grid_stem}.csv", index=False, header=False
                 )
 
@@ -297,6 +309,9 @@ def run_object_aoi(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                             "y",
                             "grid_x",
                             "grid_y",
+                            "grid_state_timestamp",
+                            "tile_id",
+                            "eye_origin_timestamp",
                             "tile_pixel_x_min",
                             "tile_pixel_x_max",
                             "tile_pixel_y_min",

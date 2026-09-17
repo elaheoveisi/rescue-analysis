@@ -13,15 +13,8 @@ from model.help_vs_auto import run_classifiers
 
 
 def timestamp_at_step(step_timestamps: pd.Series, target_step: float) -> float:
-    """Converts a game step into the real timestamp when that step occurred."""
-    idx = step_timestamps.index.to_numpy()
-    vals = step_timestamps.to_numpy()
-    if target_step <= idx.min():
-        return vals[0]
-    if target_step >= idx.max():
-        return vals[-1]
-    pos = np.searchsorted(idx, target_step, side="left")
-    return vals[pos]
+    """An unobserved action has no timestamp; do not clamp/interpolate it."""
+    return step_timestamps.get(target_step, np.nan)
 
 
 def build_events_steps(cfg: dict) -> pd.DataFrame:
@@ -35,14 +28,15 @@ def build_events_steps(cfg: dict) -> pd.DataFrame:
 
 
 def build_features_steps(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
-    def compute_window_bounds(step_timestamps, eye_start_ts, step, window_steps):
-        event_ts = step_timestamps.get(step)
+    def compute_window_bounds(step_timestamps, eye_start_ts, step, window_steps, event_ts):
         if event_ts is None or pd.isna(event_ts):
             return None
         event_ts_ms = (event_ts - eye_start_ts) * 1000.0
         window_start_ts = timestamp_at_step(step_timestamps, step - window_steps)
         window_start_ms = (window_start_ts - eye_start_ts) * 1000.0
-        window_duration_s = max((event_ts_ms - window_start_ms) / 1000.0, 1e-6)
+        window_duration_s = (event_ts_ms - window_start_ms) / 1000.0
+        if not np.isfinite(window_duration_s) or window_duration_s <= 0:
+            return None
         return window_start_ms, event_ts_ms, window_duration_s
 
     return build_features_core(cfg, events_df, compute_window_bounds)
@@ -58,7 +52,7 @@ def run(cfg: dict):
     #print("Building features...")
     features_df = events_df.merge(
         build_features_steps(cfg, events_df),
-        on=["subject", "trial", "run", "step", "label", "window"], how="left",
+        on=["subject", "trial", "run", "step", "label", "window", "event_timestamp"], how="left",
     )
 
     events_df.to_csv(processed / "help_vs_auto_events_stepwin.csv", index=False)
