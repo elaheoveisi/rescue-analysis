@@ -38,9 +38,27 @@ def run_glmm(df: pd.DataFrame, outcome: str) -> dict:
     }
 
 
+def prepare_condition_expertise_df(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """Filter to configured subjects and code condition/expertise as
+    categoricals. Shared by glmm.run_all and multivariate_mixed.run_all --
+    keep both in sync by editing only here."""
+    condition_map = cfg.get("analysis", {}).get("condition_by_category", {})
+
+    subjects = cfg.get("sub", [])
+    if subjects:
+        df = df[df["participant"].isin(subjects)]
+    if df.empty:
+        return df
+
+    df = df.rename(columns={"trial": "category"})
+    df["condition"] = df["category"].map(condition_map).fillna("unknown")
+    df["condition"] = pd.Categorical(df["condition"], categories=["no_llm", "llm"])
+    df["expertise"] = pd.Categorical(df["expertise"], categories=["novice", "expert"])
+    return df
+
+
 def run_all(cfg: dict, dataframes: dict) -> pd.DataFrame:
     """Run one mixed model per feature across all runs (participant random intercept handles repeated measures)."""
-    condition_map = cfg.get("analysis", {}).get("condition_by_category", {})
     count_features = cfg["glmm2"]["count"]
     features = cfg["glmm2"]["continuous"] + count_features
     rows = []
@@ -49,18 +67,9 @@ def run_all(cfg: dict, dataframes: dict) -> pd.DataFrame:
         if df is None or df.empty:
             continue
 
-        subjects = cfg.get("sub", [])
-        if subjects:
-            df = df[df["participant"].isin(subjects)]
+        df = prepare_condition_expertise_df(df, cfg)
         if df.empty:
             continue
-
-        df = df.rename(columns={"trial": "category"})
-        df["condition"] = df["category"].map(condition_map).fillna("unknown")
-        df["condition"] = pd.Categorical(df["condition"], categories=["no_llm", "llm"])
-        df["expertise"] = pd.Categorical(
-            df["expertise"], categories=["novice", "expert"]
-        )
 
         keep = ["participant", "condition", "expertise"] + features
         prepared = df[keep].reset_index(drop=True)

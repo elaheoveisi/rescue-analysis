@@ -1,23 +1,8 @@
 import arviz as az
-import numpy as np
 import pandas as pd
 import pymc as pm
 
-
-def prepare_univariate_df(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """All runs per participant/trial, with condition/expertise coded the
-    same way glmm.run_all does (kept in sync with that function)."""
-    condition_map = cfg.get("analysis", {}).get("condition_by_category", {})
-
-    subjects = cfg.get("sub", [])
-    if subjects:
-        df = df[df["participant"].isin(subjects)]
-
-    df = df.rename(columns={"trial": "category"})
-    df["condition"] = df["category"].map(condition_map).fillna("unknown")
-    df["condition"] = pd.Categorical(df["condition"], categories=["no_llm", "llm"])
-    df["expertise"] = pd.Categorical(df["expertise"], categories=["novice", "expert"])
-    return df
+from model.glmm import prepare_condition_expertise_df
 
 
 def _fixed_effect_rows(idata: az.InferenceData, outcomes: list[str]) -> pd.DataFrame:
@@ -139,7 +124,9 @@ def run_all(cfg: dict, dataframes: dict) -> pd.DataFrame:
         if df is None or df.empty:
             continue
 
-        prepared = prepare_univariate_df(df, cfg)
+        prepared = prepare_condition_expertise_df(df, cfg)
+        if prepared.empty:
+            continue
         prepared = prepared[
             ["participant", "category", "condition", "expertise"]
             + [o for o in outcomes if o in prepared.columns]
