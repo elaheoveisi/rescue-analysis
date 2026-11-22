@@ -23,6 +23,8 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
     """
     hva_cfg = cfg["help_vs_auto"]
     exclude = set(hva_cfg.get("exclude_participants", []))
+    group = hva_cfg.get("expertise_filter")  # None = everyone; "expert"/"novice" = only that group
+    expertise = cfg.get("expertise", {})
     llm_trials = hva_cfg.get("llm_trials", ["gemini", "openai"])  # pooled, not split
     min_fix = hva_cfg.get("min_fixations", 2)
     auto_interval_steps = hva_cfg["auto_interval_steps"]
@@ -41,6 +43,8 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
         for gk in [k for k in keys if k.endswith("/game")]:
             _, sid, trial, run_dir, _ = gk.split("/")
             if sid in exclude or trial not in llm_trials:
+                continue
+            if group and expertise.get(sid, "unknown") != group:
                 continue
             ek = f"/{sid}/{trial}/{run_dir}/eye_tracking"
             if ek not in keys:
@@ -98,7 +102,7 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
 
 
 def build_events(cfg: dict) -> pd.DataFrame:
-    windows = cfg["help_vs_auto"].get("windows_s", [5, 10, 15, 20])
+    windows = cfg["help_vs_auto"]["windows_s"]
     return build_events_core(
         cfg, windows,
         get_lo=lambda step_ts, eye_min, event_rel_ms, event_step, w: event_rel_ms - w * 1000.0,

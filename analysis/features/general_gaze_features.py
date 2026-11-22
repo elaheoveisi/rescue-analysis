@@ -18,7 +18,7 @@ def build_events(cfg: dict) -> pd.DataFrame:
     hva_cfg = cfg["help_vs_auto"]
     exclude = set(hva_cfg.get("exclude_participants", []))
     llm_trials = hva_cfg.get("llm_trials", ["gemini", "openai"])  # pooled, not split
-    windows = hva_cfg.get("windows_s", [5, 10, 15, 20])
+    windows = hva_cfg["windows_s"]
     auto_interval_steps = hva_cfg["auto_interval_steps"]
 
     processed = Path(cfg["paths"]["processed"])

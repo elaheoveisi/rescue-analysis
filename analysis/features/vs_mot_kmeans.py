@@ -10,9 +10,12 @@ def load_subject_scores(raw_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows, skipped = [], []
 
     for vs_path in sorted(
-        raw_dir.glob("sub-*/vs_mot/sub-*_visual_search_*.csv")
-    ) + sorted(raw_dir.glob("sub-*/vs-mot/sub-*_visual_search_*.csv")):
-        subject_id = vs_path.parts[-3]
+        p
+        for pattern in ("sub-*/vs_mot", "sub-*/vs-mot", "sub-*/ses-*/vs_mot", "sub-*/ses-*/vs-mot")
+        for p in raw_dir.glob(f"{pattern}/sub-*_visual_search_*.csv")
+    ):
+        # folder name, not file name: some files are saved under the wrong ID
+        subject_id = vs_path.relative_to(raw_dir).parts[0]
         mot_paths = list(vs_path.parent.glob("sub-*_multi_object_tracking_*.csv"))
 
         if not mot_paths:
@@ -42,8 +45,20 @@ def load_subject_scores(raw_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     return pd.DataFrame(rows), pd.DataFrame(skipped)
 
 
-def run_vs_mot_kmeans(raw_dir: Path, output_dir: Path) -> dict[str, pd.DataFrame]:
+def run_vs_mot_kmeans(
+    raw_dir: Path,
+    output_dir: Path,
+    exclude: list[str] | None = None,
+    extra: list[dict] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """exclude: subject IDs to drop (e.g. "P012").
+    extra: already-scored participants (leaderboard), each with subject_id,
+    vs_score, vs_rt_correct (s) and mot_score."""
     combined, skipped = load_subject_scores(raw_dir)
+
+    drop = {f"sub-{s}" for s in exclude or []}
+    combined = combined[~combined["subject_id"].isin(drop)]
+    combined = pd.concat([combined, pd.DataFrame(extra or [])], ignore_index=True)
 
     combined["vs_rt_correct"] = combined["vs_rt_correct"].fillna(
         combined["vs_rt_correct"].median()
