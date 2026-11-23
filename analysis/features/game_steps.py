@@ -19,7 +19,7 @@ def action_timestamps(game: pd.DataFrame) -> pd.Series:
         raise ValueError("Expected nondecreasing integer total_steps within a trial")
     if "step_count" in game and pd.to_numeric(game["step_count"], errors="coerce").dropna().diff().lt(0).any():#if step counts decrease!
         raise ValueError("Old run boundaries detected: rerun split_data_by_trial and feature extraction.")
-    return frame.groupby("total_steps")["timestamp"].min()
+    return frame.groupby("total_steps")["timestamp"].min() #selects the earliest timestamp in each group.
 
 
 def event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFrame:
