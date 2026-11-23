@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import copy
@@ -6,12 +5,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import shap
 from features.help_vs_auto_features import (
     build_events_core,
     build_features_core,
 )
-from model.help_vs_auto import balanced_sample, make_rf, run_classifiers, window_rows
+from model.help_vs_auto import fit_rf, run_classifiers, test_subject, window_rows
 
 # Modes for run(): within-group LOSO, or train on one group and test on the other.
 WITHIN_MODES = {"all": None, "expert": "expert", "novice": "novice"}
@@ -119,55 +117,43 @@ def run_one_interval(cfg: dict, interval: int, group: str | None = None) -> pd.D
     print_counts(counts, interval)
 
     print("\nRunning RF classifiers")
-    results, shap_df, cm = run_classifiers(cfg, features_df)
-    results = results.rename(columns={"window_s": "window_steps"})
-    results.insert(0, "auto_interval", interval)
-
-    results["n_per_class_after_balancing"] = results["n_test_after_balancing"] / 2
-    cm = cm.rename(columns={"window_s": "window_steps"})
-    shap_df = shap_df.rename(columns={"window_s": "window_steps"}) if not shap_df.empty else shap_df
-
-    results.to_csv(processed / f"help_vs_auto_classifier_results_{suffix}.csv", index=False)
-    cm.to_csv(processed / f"help_vs_auto_confusion_matrix_{suffix}.csv", index=False)
-    shap_df.to_csv(processed / f"help_vs_auto_shap_values_{suffix}.csv", index=False)
-
-    print(f"\nSaved outputs -> {processed} (*_{suffix}.csv)")
+    results = save_model_outputs(processed, suffix, {"auto_interval": interval}, *run_classifiers(cfg, features_df))
     print(f"\n=== Results (step window, auto every {interval} actions) ===")
     print(results.to_string(index=False))
     return results
 
 
+def save_model_outputs(processed: Path, suffix: str, front_cols: dict,
+                       results: pd.DataFrame, shap_df: pd.DataFrame, cm: pd.DataFrame) -> pd.DataFrame:
+    """Rename window_s -> window_steps, put `front_cols` first in results, and
+    save results / confusion matrix / SHAP as *_<suffix>.csv."""
+    results, shap_df, cm = (t.rename(columns={"window_s": "window_steps"}) for t in (results, shap_df, cm))
+    for i, (col, val) in enumerate(front_cols.items()):
+        results.insert(i, col, val)
+    results["n_per_class_after_balancing"] = results["n_test_after_balancing"] / 2
+
+    results.to_csv(processed / f"help_vs_auto_classifier_results_{suffix}.csv", index=False)
+    cm.to_csv(processed / f"help_vs_auto_confusion_matrix_{suffix}.csv", index=False)
+    shap_df.to_csv(processed / f"help_vs_auto_shap_values_{suffix}.csv", index=False)
+    print(f"\nSaved outputs -> {processed} (*_{suffix}.csv)")
+    return results
+
+
 def cross_group_predictor(expertise: dict, train_group: str, test_group: str):
     """Drop-in replacement for loso_predictions: one RF fit on every subject of
-    `train_group` (balanced), then each `test_group` subject is tested on their
-    own balanced events. Groups don't overlap, so no subject is held out."""
+    `train_group`, then each `test_group` subject is tested on their own events.
+    Groups don't overlap, so no subject is held out."""
     def predict(base, features, hva_cfg, seed):
         group_of = base["subject"].map(lambda s: expertise.get(s, "unknown"))
         train_raw, test_df = base[group_of == train_group], base[group_of == test_group]
-        y_true, y_pred, shap_rows, x_rows, per_subject = [], [], [], [], []
-        if train_raw["label"].nunique() == 2:
-            train_bal = balanced_sample(train_raw, seed)
-            rf = make_rf(hva_cfg)
-            rf.fit(train_bal[features], train_bal["label"])
-            explainer = shap.TreeExplainer(rf)
-            for s, test_raw in test_df.groupby("subject"):
-                if test_raw["label"].nunique() < 2:
-                    continue
-                test_bal = balanced_sample(test_raw, seed)
-                p = rf.predict_proba(test_bal[features])[:, 1]
-                y_true.extend(test_bal["label"].tolist())
-                y_pred.extend(p.tolist())
-                per_subject.append((s, test_bal["label"].tolist(), p.tolist()))
-                sv = explainer.shap_values(test_bal[features])
-                if isinstance(sv, list):
-                    sv = sv[1]  # positive-class (label=1) SHAP values
-                elif sv.ndim == 3:
-                    sv = sv[:, :, 1]
-                shap_rows.append(sv)
-                x_rows.append(test_bal[features].to_numpy(dtype=float))
-        shap_matrix = np.vstack(shap_rows) if shap_rows else np.empty((0, len(features)))
-        x_matrix = np.vstack(x_rows) if x_rows else np.empty((0, len(features)))
-        return {"rf": (y_true, y_pred, shap_matrix, x_matrix, per_subject)}
+        if train_raw["label"].nunique() < 2:
+            return []
+        rf = fit_rf(train_raw, features, hva_cfg, seed)
+        return [
+            test_subject(rf, s, test_raw, features, seed)
+            for s, test_raw in test_df.groupby("subject")
+            if test_raw["label"].nunique() == 2
+        ]
     return predict
 
 
@@ -197,22 +183,9 @@ def run_cross_interval(cfg: dict, interval: int, train_group: str, test_group: s
     counts.insert(0, "auto_interval", interval)
     counts.to_csv(processed / f"help_vs_auto_event_counts_{suffix}.csv", index=False)
 
-    results, shap_df, cm = run_classifiers(
-        cfg, features_df, predict=cross_group_predictor(expertise, train_group, test_group),
-    )
-    results = results.rename(columns={"window_s": "window_steps"})
-    results.insert(0, "auto_interval", interval)
-    results.insert(1, "train_group", train_group)
-    results.insert(2, "test_group", test_group)
-    results["n_per_class_after_balancing"] = results["n_test_after_balancing"] / 2
-    cm = cm.rename(columns={"window_s": "window_steps"})
-    shap_df = shap_df.rename(columns={"window_s": "window_steps"}) if not shap_df.empty else shap_df
-
-    results.to_csv(processed / f"help_vs_auto_classifier_results_{suffix}.csv", index=False)
-    cm.to_csv(processed / f"help_vs_auto_confusion_matrix_{suffix}.csv", index=False)
-    shap_df.to_csv(processed / f"help_vs_auto_shap_values_{suffix}.csv", index=False)
-    print(f"\nSaved outputs -> {processed} (*_{suffix}.csv)")
-    return results
+    tables = run_classifiers(cfg, features_df, predict=cross_group_predictor(expertise, train_group, test_group))
+    front = {"auto_interval": interval, "train_group": train_group, "test_group": test_group}
+    return save_model_outputs(processed, suffix, front, *tables)
 
 
 def run(cfg: dict, modes=("all",)):
