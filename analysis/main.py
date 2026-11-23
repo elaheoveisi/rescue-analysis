@@ -4,17 +4,18 @@ import pandas as pd
 import yaml
 from features.extract_features import extract_features
 from features.gaze_entropy import run_entropy_grouped
-from features.general_gaze_features import build_features_dataset as build_general_gaze_features
 from features.victim_aoi import run_object_aoi
 from features.vs_mot_kmeans import run_vs_mot_kmeans
 from model.glmm import run_all as run_glmmsecond
-from model.help_vs_auto import build_features_dataset as build_help_vs_auto_features
-from model.help_vs_auto import run_models as run_help_vs_auto_models
-from model.help_vs_auto_stepwin import run as run_help_vs_auto_stepwin
-from model.help_vs_auto_meanwin import run as run_help_vs_auto_meanwin
+from classification.classifier import build_features_dataset as build_info_request_features
+from classification.classifier import run_models as run_info_request_models
+from classification.meanwin import run as run_info_request_meanwin
+from classification.pause import run as run_info_request_pause
+from classification.stepwin import run as run_info_request_stepwin
 from model.power_analysis import run as run_power_analysis
 from prepare_data.data import split_all_data_by_trial
 from utils import skip_run
+
 # from validate_aoi_fixations import run_validation
 
 with open("configs/analysis.yml") as f:
@@ -65,20 +66,24 @@ with skip_run("skip", "power_analysis") as check, check():
     run_power_analysis(cfg)
 
 with skip_run("skip", "general_gaze_features") as check, check():
-    build_general_gaze_features(cfg)
+    build_info_request_features(cfg, general=True)
 
-with skip_run("skip", "help_vs_auto_features") as check, check():
-    build_help_vs_auto_features(cfg)
+with skip_run("skip", "info_request_features") as check, check():
+    build_info_request_features(cfg)
 
-with skip_run("skip", "help_vs_auto_models") as check, check():
-    run_help_vs_auto_models(cfg)
+with skip_run("skip", "info_request_models") as check, check():
+    run_info_request_models(cfg)
 
-with skip_run("run", "help_vs_auto_stepwin") as check, check():
-    # Pick any of: "all", "expert", "novice"            -> leave-one-subject-out within that group
-    #              "expert_to_novice", "novice_to_expert" -> train on one group, test on the other
-    #                                                       (reuses the "all" features files)
-    run_help_vs_auto_stepwin(cfg, modes=["all", "expert", "novice", "expert_to_novice", "novice_to_expert"])
+with skip_run("run", "info_request_stepwin") as check, check():
+    # Pick any of: "all", "expert", "novice" -> leave-one-subject-out within that group
+    # "expert_to_novice", "novice_to_expert" -> train on one group, test on the other
+    # (reuses the "all" features files)
+    run_info_request_stepwin(
+        cfg, modes=["all", "expert", "novice", "expert_to_novice", "novice_to_expert"]
+    )
 
-with skip_run("skip", "help_vs_auto_meanwin") as check, check():
-    run_help_vs_auto_meanwin(cfg)
+with skip_run("skip", "info_request_pause") as check, check():
+    run_info_request_pause(cfg)
 
+with skip_run("skip", "info_request_meanwin") as check, check():
+    run_info_request_meanwin(cfg)

@@ -5,10 +5,10 @@ This is where you describe how to get set up on a clean install, including the
 commands necessary to get the raw data (using the `sync_data_from_s3` command,
 for example), and then how to make the cleaned, final data sets.
 
-help_vs_auto.py data flow
+classifier.py data flow
 ==========================
 
-``analysis/model/help_vs_auto.py`` reads its data columns without defining
+``analysis/classification/classifier.py`` reads its data columns without defining
 them in the file itself -- they come from an earlier pipeline stage. This is
 a quick reference for where each column originates and which functions expect
 it, so the module doesn't have to be read top-to-bottom to make sense of it.
@@ -16,7 +16,7 @@ it, so the module doesn't have to be read top-to-bottom to make sense of it.
 Pipeline order (also the actual execution order, driven by ``run()`` at the
 bottom of the file):
 
-1. ``build_events(cfg)`` (in ``analysis/features/help_vs_auto_features.py``)
+1. ``build_events(cfg)`` (in ``analysis/classification/features.py``)
    creates ``events_df`` with columns ``subject``, ``trial``, ``run``,
    ``step``, ``label``, ``window``, ``sge``, ``gte``.
 
@@ -27,7 +27,7 @@ bottom of the file):
    features and is merged onto ``events_df`` (on ``subject``, ``trial``,
    ``run``, ``step``, ``label``, ``window``) to form ``features_df``.
 
-3. ``prep_window(df, w, features)`` (in ``help_vs_auto.py``) slices
+3. ``prep_window(df, w, features)`` (in ``classifier.py``) slices
    ``features_df`` to one time window and adds two derived columns used only
    within this module:
 
@@ -46,17 +46,17 @@ Quick lookup:
 ======================  ========================================  =========================================
 Column/variable          Created in                                 Meaning
 ======================  ========================================  =========================================
-``label``                ``help_vs_auto_features.py`` (events)      1 = manual alt-press, 0 = automatic
-``window``                ``help_vs_auto_features.py`` (events)      Look-back window length, in seconds
-``subject_cat``           ``help_vs_auto.py: prep_window``           Categorical subject ID (random effect)
-``fixed_effect_cols``     ``help_vs_auto.py: prep_window``           Z-scored feature names (fixed effects)
-``balanced_df``           ``help_vs_auto.py: balanced_sample``       Class-balanced slice used for LOSO fit/test
+``label``                ``features.py`` (events)      1 = manual alt-press, 0 = automatic
+``window``                ``features.py`` (events)      Look-back window length, in seconds
+``subject_cat``           ``classifier.py: prep_window``           Categorical subject ID (random effect)
+``fixed_effect_cols``     ``classifier.py: prep_window``           Z-scored feature names (fixed effects)
+``balanced_df``           ``classifier.py: balanced_sample``       Class-balanced slice used for LOSO fit/test
 ======================  ========================================  =========================================
 
 Glossary: functions
 --------------------
 
-Plain-English description of every function in ``help_vs_auto.py``, in the
+Plain-English description of every function in ``classifier.py``, in the
 order they appear in the file:
 
 ``balanced_sample(df, seed)``
@@ -153,7 +153,7 @@ Short-lived variable names that show up inside the functions above:
     (manual alt-press).
 
 ``hva_cfg``
-    Shorthand for ``cfg["help_vs_auto"]`` -- the config block with settings
+    Shorthand for ``cfg["info_request"]`` -- the config block with settings
     specific to this analysis (feature list, number of repeats, etc).
 
 ``features``

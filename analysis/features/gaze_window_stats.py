@@ -1,5 +1,5 @@
-"""Per-window gaze/saccade/pupil statistics shared by help_vs_auto_features.py
-and general_gaze_features.py. Extracted here because both modules had grown
+"""Per-window gaze/saccade/pupil statistics shared by classification/features.py
+and the general gaze features (build_features_dataset(general=True)). Extracted here because both had grown
 identical copies of these functions -- keep the single implementation here
 rather than re-duplicating a fix or a docstring in only one file next time.
 

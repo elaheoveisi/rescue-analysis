@@ -73,8 +73,37 @@ def event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFrame
     return pd.DataFrame(rows, columns=columns)
 
 
+<<<<<<< Updated upstream
 def join_trial_games(games: list[pd.DataFrame]) -> pd.DataFrame:
     """All runs' game logs of one trial as one time-ordered log."""
+=======
+def matched_random_negatives(events: pd.DataFrame, delivered: np.ndarray, step_ts: pd.Series, rng) -> pd.DataFrame:
+    """Keep the Alt presses of one run and replace its automatic rows by random actions: one per
+    press, matched on steps since the previous info delivery (`delivered` = Alt/auto steps of the trial)."""
+    d = np.sort(delivered)
+
+    def gap(steps):
+        i = np.searchsorted(d, steps) - 1  # last delivery strictly before each step
+        return np.where(i >= 0, steps - d[np.maximum(i, 0)], np.nan)
+
+    steps = step_ts.index.to_numpy()
+    g = gap(steps)
+    ok = np.isfinite(g) & ~np.isin(steps, d)
+    cand = pd.DataFrame({"step": steps[ok], "timestamp": step_ts.to_numpy()[ok], "gap": g[ok]})
+    alt, rows = events[events["label"] == 1], []
+    for _, a in alt.sample(frac=1, random_state=rng).iterrows():
+        diff = (cand["gap"] - gap(np.array([a["step"]]))[0]).abs()
+        if diff.isna().all():
+            continue
+        pick = cand[diff == diff.min()].sample(1, random_state=rng).iloc[0]
+        cand = cand.drop(pick.name)
+        rows.append({"step": pick["step"], "timestamp": pick["timestamp"], "label": 0, "event_basis": "matched_random"})
+    return pd.concat([alt, pd.DataFrame(rows)], ignore_index=True)
+
+
+def games_event_timeline(games: list, interval: int) -> pd.DataFrame:
+    """Event timeline over all runs of one trial (game frames joined in time order)."""
+>>>>>>> Stashed changes
     # All-null optional fields differ across reset-only and active episodes.
     game = pd.concat([g.dropna(axis=1, how="all") for g in games], ignore_index=True).sort_values("timestamp", kind="stable")
     return game.drop_duplicates("timestamp")
@@ -85,6 +114,11 @@ def trial_event_timeline(store, game_key: str, interval: int) -> pd.DataFrame:
     prefix = game_key.rsplit("/", 2)[0] + "/"
     games = [store[k] for k in store.keys() if k.startswith(prefix) and k.endswith("/game")]
     return event_timeline(join_trial_games(games), interval)
+
+
+def trial_event_timeline(store, game_key: str, interval: int) -> pd.DataFrame:
+    prefix = game_key.rsplit("/", 2)[0] + "/"
+    return games_event_timeline([store[k] for k in store.keys() if k.startswith(prefix) and k.endswith("/game")], interval)
 
 
 def validate_eye_origin(frame: pd.DataFrame, origin: float) -> None:

@@ -81,16 +81,19 @@ entropy_groups:
   Interface: [info_panel, chat_panel]
 
 # Accepted Alt presses vs reconstructed automatic requests (50 actions since last AI call)
-# classification. See analysis/model/help_vs_auto.py.
-help_vs_auto:
+# classification. See analysis/classification/classifier.py.
+info_request:
   exclude_participants: [ P005, P013,P012 ]
   llm_trials: [ gemini, openai ] # dummy has no LLM, so no automatic events -- gemini and openai are pooled, not modeled separately
   auto_interval_steps: 50 # total_steps actions, restarted after every AI call
+  pause_taus: [0.25, 0.5, 0.75, 1.0, 1.5, 2.0] # pause windows (classification/pause.py): gaze in the first tau seconds after an action; request = pause ends in an Alt press
+  stepwin_end: press # press = Alt windows end at the press; action = end at the last action's timestamp (drops the gap before the press)
+  negatives: offset # non-request moments: offset = the auto events N steps after the last info delivery; matched_random = random actions matched to each request on steps since the last delivery
   windows_s: [1,2,3,4,5,6,7,8,9,10] # seconds of look-back before each event
   stepwin_auto_intervals: [20,25, 30, 50] # stepwin reruns once per value (auto help every N actions); 50 = the game's real rule
   stepwin_tag: fair8 # added to stepwin output names (e.g. *_stepwin_fair6_auto50.csv) so old files are kept; remove for plain names
-  step_windows: [1,2,3,4,5] # total_steps actions of look-back before each event (see help_vs_auto_stepwin.py)
-  meanwin_step_s: 1.07 # mean seconds per step (gemini+openai, P012 excluded); meanwin windows = k * this (see help_vs_auto_meanwin.py)
+  step_windows: [1,2,3,4,5] # total_steps actions of look-back before each event (see classification/stepwin.py)
+  meanwin_step_s: 1.07 # mean seconds per step (gemini+openai, P012 excluded); meanwin windows = k * this (see classification/meanwin.py)
   meanwin_steps: [8, 9, 10] # k values to run; window = k * meanwin_step_s
   min_fixations: 2 # below this, SGE/GTE for that window are left null
   recent_window_s: 2 # look-back for the recency-weighted "recent_*_dwell_fraction" features
@@ -103,12 +106,12 @@ help_vs_auto:
   rf_min_samples_leaf: 10
   rf_random_state: 0
   classification_threshold: 0.5 # predicted-probability cutoff for label=1 (Alt) in _score and confusion_matrices
-  events_file: help_vs_auto_events.csv
-  features_file: help_vs_auto_features.csv
-  results_file: help_vs_auto_classifier_results.csv
-  shap_file: help_vs_auto_shap_values.csv
-  confusion_matrix_file: help_vs_auto_confusion_matrix.csv
-  ablation_file: help_vs_auto_ablation.csv
+  events_file: info_request_events.csv
+  features_file: info_request_features.csv
+  results_file: info_request_classifier_results.csv
+  shap_file: info_request_shap_values.csv
+  confusion_matrix_file: info_request_confusion_matrix.csv
+  ablation_file: info_request_ablation.csv
 
   # NaN -> 0 when a window has no fixations/saccades (event kept). Any other
   # NaN feature (e.g. mean/peak_pupil_diameter with no valid pupil sample)

@@ -62,40 +62,6 @@ def build_transition_matrix(labeled: pd.DataFrame, types: list) -> pd.DataFrame:
     return matrix
 
 
-def run_entropy(cfg: dict) -> pd.DataFrame:
-    """Compute SGE and GTE from object_aoi_fixations.csv, writing entropy_features.csv.
-
-    Requires victim_aoi.run_object_aoi to have been run first.
-    """
-    # Deferred import — victim_aoi imports sge/gte from this module at module level,
-    # so importing victim_aoi here would be circular if done at module level.
-    processed = Path(cfg["paths"]["processed"])
-    fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
-
-    panel_names = [a["name"] for a in cfg["aoi"] if a.get("type", "static") == "static"]
-    gte_types = ["victim"] + panel_names
-
-    rows = []
-    for (sid, trial, run), group in fix_all.groupby(["subject", "trial", "run"]):
-        group = group.sort_values("start_ms")
-        gte_matrix = build_transition_matrix(group, gte_types)
-
-        rows.append(
-            {
-                "subject": sid,
-                "trial": trial,
-                "run": run,
-                "sge": sge(group),
-                "gte": gte(gte_matrix),
-            }
-        )
-
-    ent_df = pd.DataFrame(rows)
-    ent_df.to_csv(processed / "entropy_features.csv", index=False)
-    print(f"Saved {len(ent_df)} rows -> entropy_features.csv")
-    return ent_df
-
-
 # ---------------------------------------------------------------------------
 # Config-driven AOI grouping (same category set used for both SGE and GTE)
 # ---------------------------------------------------------------------------

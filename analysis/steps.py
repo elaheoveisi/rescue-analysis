@@ -1,8 +1,8 @@
 """Automatic vs manual AI help per participant, read straight from each XDF.
 
 Participants: the sub: list in configs/analysis.yml. Only the LLM trials
-(help_vs_auto.llm_trials) count; automatic calls are reconstructed every
-help_vs_auto.auto_interval_steps actions since the last AI call.
+(info_request.llm_trials) count; automatic calls are reconstructed every
+info_request.auto_interval_steps actions since the last AI call.
 Does not touch data.h5. Run from the repo root: python analysis/steps.py
 """
 
@@ -10,15 +10,19 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
+<<<<<<< Updated upstream
 from features.game_steps import event_timeline, join_trial_games
+=======
+from features.game_steps import games_event_timeline
+>>>>>>> Stashed changes
 from prepare_data.data import process_subject
 
 with open("configs/analysis.yml") as f:
     cfg = yaml.safe_load(f)
 
 trials = [str(t) for t in cfg["trials"]]
-llm_trials = cfg["help_vs_auto"]["llm_trials"]
-interval = cfg["help_vs_auto"]["auto_interval_steps"]
+llm_trials = cfg["info_request"]["llm_trials"]
+interval = cfg["info_request"]["auto_interval_steps"]
 
 rows, failed = [], []
 for sid in [str(s) for s in cfg["sub"]]:
@@ -34,7 +38,11 @@ for sid in [str(s) for s in cfg["sub"]]:
         trial = next((t for t in trials if t in trial_id), None)
         if trial not in llm_trials:
             continue
+<<<<<<< Updated upstream
         timeline = event_timeline(join_trial_games([r["game"] for r in runs.values()]), interval)
+=======
+        timeline = games_event_timeline([r["game"] for r in runs.values()], interval)
+>>>>>>> Stashed changes
         auto += int((timeline["label"] == 0).sum())
         manual += int((timeline["label"] == 1).sum())
     rows.append({"subject": sid, "automatic": auto, "manual": manual, "total": auto + manual})
