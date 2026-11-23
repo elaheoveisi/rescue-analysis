@@ -17,7 +17,7 @@ def action_timestamps(game: pd.DataFrame) -> pd.Series:
     steps = frame["total_steps"]
     if ((steps < 0) | (steps % 1 != 0) | (steps.diff() < 0)).any():
         raise ValueError("Expected nondecreasing integer total_steps within a trial")
-    if "step_count" in game and pd.to_numeric(game["step_count"], errors="coerce").dropna().diff().lt(0).any():
+    if "step_count" in game and pd.to_numeric(game["step_count"], errors="coerce").dropna().diff().lt(0).any():#if step counts decrease!
         raise ValueError("Old run boundaries detected: rerun split_data_by_trial and feature extraction.")
     return frame.groupby("total_steps")["timestamp"].min()
 
