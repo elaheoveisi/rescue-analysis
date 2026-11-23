@@ -15,8 +15,9 @@ from features.gaze_window_stats import (
 )
 
 
-from features.game_steps import (
-    EVENT_KEYS, action_timestamps, trial_event_timeline, validate_eye_origin, window_slice,
+from features.game_steps import EVENT_KEYS, action_timestamps, validate_eye_origin, window_slice
+from features.event_windows import (
+    event_windows, key_row, llm_runs, load_run, run_events, time_window, valid_window,
 )
 
 
@@ -27,13 +28,8 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
     `get_lo(step_ts, eye_min, event_rel_ms, event_step, w) -> lo`.
     """
     hva_cfg = cfg["help_vs_auto"]
-    exclude = set(hva_cfg.get("exclude_participants", []))
-    group = hva_cfg.get("expertise_filter")  # None = everyone; "expert"/"novice" = only that group
-    expertise = cfg.get("expertise", {})
-    llm_trials = hva_cfg.get("llm_trials", ["gemini", "openai"])  # pooled, not split
     min_fix = hva_cfg.get("min_fixations", 2)
-    auto_interval_steps = hva_cfg["auto_interval_steps"]
-
+    interval = hva_cfg["auto_interval_steps"]
     groups = cfg["entropy_groups"]
     gte_types = list(groups.keys())
 
@@ -41,75 +37,46 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
     fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
     fix_all["obj_type_grouped"] = fix_all["obj_type"].apply(lambda t: regroup_obj_type(t, groups))
 
-    rows = []
-    timelines = {}
+    rows, timelines = [], {}
     with pd.HDFStore(str(processed / "data.h5"), mode="r") as store:
-        keys = store.keys()
-        for gk in [k for k in keys if k.endswith("/game")]:
-            _, sid, trial, run_dir, _ = gk.split("/")
-            if sid in exclude or trial not in llm_trials:
-                continue
-            if group and expertise.get(sid, "unknown") != group:
-                continue
-            ek = f"/{sid}/{trial}/{run_dir}/eye_tracking"
-            if ek not in keys:
-                continue
-            run_num = int(run_dir.replace("run_", ""))
-
-            sub_fix = fix_all[
-                (fix_all["subject"] == sid) & (fix_all["trial"] == trial) & (fix_all["run"] == run_num)
-            ]
+        for sid, trial, run, gk in llm_runs(store, cfg):
+            sub_fix = fix_all[(fix_all["subject"] == sid) & (fix_all["trial"] == trial) & (fix_all["run"] == run)]
             if sub_fix.empty:
                 continue
-
-            game = store[gk]
-            eye = store[ek]
-            if game.empty or eye.empty:
+            loaded = load_run(store, sid, trial, run)
+            if loaded is None:
                 continue
-            eye_min = pd.to_numeric(eye["timestamp"], errors="coerce").min()
-
-            game = game.copy()
-            game["timestamp"] = pd.to_numeric(game["timestamp"], errors="coerce")
-            game["step_count"] = pd.to_numeric(game["step_count"], errors="coerce")
+            game, _, eye_min = loaded
             validate_eye_origin(sub_fix, eye_min)
             step_ts = action_timestamps(game)
 
-            trial_key = (sid, trial)
-            if trial_key not in timelines:
-                timelines[trial_key] = trial_event_timeline(store, gk, auto_interval_steps)
-            timeline = timelines[trial_key]
-            events = timeline[timeline["timestamp"].between(game["timestamp"].min(), game["timestamp"].max())]
-            for _, ev in events.iterrows():
+            for _, ev in run_events(store, gk, game, interval, timelines).iterrows():
                 event_rel_ms = (ev["timestamp"] - eye_min) * 1000.0
                 for w in windows:
                     lo = get_lo(step_ts, eye_min, event_rel_ms, ev["step"], w)
-                    if not np.isfinite(lo) or lo < 0 or lo >= event_rel_ms:
+                    if not valid_window(lo, event_rel_ms):
                         continue
-                    sub_fix_win = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
-                    win_fix = sub_fix_win[sub_fix_win["obj_type_grouped"].isin(gte_types)]
-                    n_fix = len(win_fix)
-                    if n_fix >= min_fix:
-                        win_grouped = win_fix[["obj_type_grouped", "duration_ms"]].rename(
-                            columns={"obj_type_grouped": "obj_type"}
-                        )
-                        sge = compute_sge(win_grouped)
-                        gte = compute_gte(build_transition_matrix(win_grouped, gte_types))
-                    else:
-                        sge, gte = None, None
+                    win_fix = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
+                    win_fix = win_fix[win_fix["obj_type_grouped"].isin(gte_types)]
+                    sge, gte = window_entropies(win_fix, gte_types) if len(win_fix) >= min_fix else (None, None)
                     rows.append({
-                        "subject": sid, "trial": trial, "run": run_num,
-                        "step": int(ev["step"]), "label": int(ev["label"]), "window": w,
-                        "event_timestamp": float(ev["timestamp"]), "event_basis": ev["event_basis"],
-                        "sge": sge, "gte": gte,
+                        **key_row(sid, trial, run, ev["step"], ev["label"], w, ev["timestamp"]),
+                        "event_basis": ev["event_basis"], "sge": sge, "gte": gte,
                     })
 
     return pd.DataFrame(rows) if rows else pd.DataFrame(columns=EVENT_KEYS)
 
 
+def window_entropies(win_fix: pd.DataFrame, gte_types: list[str]) -> tuple[float, float]:
+    """(SGE, GTE) over the AOI-group fixations of one window."""
+    grouped = win_fix[["obj_type_grouped", "duration_ms"]].rename(columns={"obj_type_grouped": "obj_type"})
+    return compute_sge(grouped), compute_gte(build_transition_matrix(grouped, gte_types))
+
+
 def build_events(cfg: dict) -> pd.DataFrame:
-    windows = cfg["help_vs_auto"]["windows_s"]
+    """Time windows: each starts `w` seconds before the event."""
     return build_events_core(
-        cfg, windows,
+        cfg, cfg["help_vs_auto"]["windows_s"],
         get_lo=lambda step_ts, eye_min, event_rel_ms, event_step, w: event_rel_ms - w * 1000.0,
     )
 
@@ -178,21 +145,6 @@ def saccade_stats_by_group(ws: pd.DataFrame, wf: pd.DataFrame, group_names: list
         stats[f"{g.lower()}_mean_saccade_amp_px"] = float(on_group["amplitude"].mean()) if not on_group.empty else np.nan
         stats[f"{g.lower()}_mean_saccade_velocity_px_s"] = saccade_velocity(on_group) if not on_group.empty else np.nan
     return stats
-
-
-def recent_dwell_fractions_suffixed(
-    wf: pd.DataFrame, group_names: list[str], lo: float, w: int, recent_window_s: float
-) -> dict:
-    """Same as dwell_fractions on entropy_groups categories, but restricted
-    to the last `recent_window_s` seconds. Same computation as the existing
-    recent_dwell_fractions(), just with the config's
-    `{group}_recent_dwell_fraction` suffix naming instead of that function's
-    `recent_{group}_*` prefix."""
-    recent_span = min(recent_window_s, w)
-    recent_lo = lo + (w - recent_span) * 1000.0
-    recent_wf = wf[wf["start_ms"] >= recent_lo]
-    per_group = dwell_fractions(recent_wf, group_names)
-    return {k.replace("_dwell_fraction", "_recent_dwell_fraction"): v for k, v in per_group.items()}
 
 
 def gaze_dispersion(wf: pd.DataFrame) -> float:
@@ -288,6 +240,7 @@ def window_features(
     # since those measure general visual engagement, not AOI identity.
     wf_aoi = wf[wf["obj_type"].isin(group_names)]
     dwell = dwell_fractions(wf_aoi, group_names)
+    recent = recent_dwell_fractions(wf, group_names, lo, w, cfg["help_vs_auto"].get("recent_window_s", 2))
 
     return {
         "fixation_rate_hz": event_rate(n_fix, w),
@@ -314,18 +267,16 @@ def window_features(
         **dwell,
         **last_aoi_fixated(wf_aoi, group_names),
         **last_transition(wf_aoi, "Interface"),
-        **recent_dwell_fractions(wf, group_names, lo, w, cfg["help_vs_auto"].get("recent_window_s", 2)),
+        **recent,
 
-        # Per-entropy_groups-category breakdown (configs/analysis.yml's
-        # help_vs_auto.features per-category list): pct_dur, fixation/saccade
-        # counts and stats, and a suffix-named recent dwell fraction, all at
-        # the same Victim/Hazard/Access/Interface granularity as `dwell`
-        # above -- computed over the full `wf`, not `wf_aoi`, since pct_dur
-        # is a fraction of window time, not of AOI-only time.
+        # Per-group breakdown over the full `wf` (pct_dur is a fraction of
+        # window time, not of AOI-only time).
         **pct_duration_by_group(wf, w, group_names),
         **fixation_stats_by_group(wf, group_names),
         **saccade_stats_by_group(ws, wf, group_names),
-        **recent_dwell_fractions_suffixed(wf, group_names, lo, w, cfg["help_vs_auto"].get("recent_window_s", 2)),
+        # Same values as `recent` above, under the "<group>_recent_dwell_fraction" names.
+        **{k.removeprefix("recent_").replace("_dwell_fraction", "_recent_dwell_fraction"): v
+           for k, v in recent.items()},
     }
 
 
@@ -336,71 +287,23 @@ def build_features_core(cfg: dict, events_df: pd.DataFrame, compute_window) -> p
     derived, which is up to `compute_window(step_ts, eye_min, step, w, event_ts) ->
     (lo, event_rel_ms, w_arg) | None` (None skips the row).
     """
-    processed = Path(cfg["paths"]["processed"])
     groups = cfg["entropy_groups"]
     group_names = list(groups.keys())
-    fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
+    fix_all = pd.read_csv(Path(cfg["paths"]["processed"]) / "object_aoi_fixations.csv")
     fix_all["obj_type"] = fix_all["obj_type"].apply(lambda t: regroup_obj_type(t, groups))
 
-    rows = []
-    with pd.HDFStore(str(processed / "data.h5"), mode="r") as store:
-        keys = store.keys()
-        for (sid, trial, run_num), sub_events in events_df.groupby(["subject", "trial", "run"]):
-            run_dir = f"run_{run_num}"
-            gk, ek = f"/{sid}/{trial}/{run_dir}/game", f"/{sid}/{trial}/{run_dir}/eye_tracking"
-            if gk not in keys or ek not in keys:
-                continue
+    def run_fixations(sid, trial, run):
+        return fix_all[
+            (fix_all["subject"] == sid) & (fix_all["trial"] == trial) & (fix_all["run"] == run)
+        ].sort_values("start_ms")
 
-            game = store[gk].copy()
-            game["timestamp"] = pd.to_numeric(game["timestamp"], errors="coerce")
-            game["step_count"] = pd.to_numeric(game["step_count"], errors="coerce")
-            eye = store[ek].copy()
-            if game.empty or eye.empty:
-                continue
-            eye["timestamp"] = pd.to_numeric(eye["timestamp"], errors="coerce")
-            eye_min = eye["timestamp"].min()
-            eye["rel_ms"] = (eye["timestamp"] - eye_min) * 1000.0
-
-            sub_fix = fix_all[
-                (fix_all["subject"] == sid) & (fix_all["trial"] == trial) & (fix_all["run"] == run_num)
-            ].sort_values("start_ms")
-
-            sacc_path = processed / sid / trial / f"run_{run_num}_saccades.csv"
-            if not sacc_path.exists():
-                raise FileNotFoundError(f"Missing {sacc_path}; rerun extract_features.")
-            sacc = pd.read_csv(sacc_path)
-
-            validate_eye_origin(sub_fix, eye_min)
-            validate_eye_origin(sacc, eye_min)
-            step_ts = action_timestamps(game)
-
-            for _, ev in sub_events.iterrows():
-                step, label, w = ev["step"], ev["label"], ev["window"]
-                window = compute_window(step_ts, eye_min, step, w, ev["event_timestamp"])
-                if window is None:
-                    continue
-                lo, event_rel_ms, w_arg = window
-                if not np.isfinite(lo) or lo < 0 or lo >= event_rel_ms:
-                    continue
-
-                wf = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
-                ws = window_slice(sacc, "start_ms", lo, event_rel_ms)
-                we = window_slice(eye, "rel_ms", lo, event_rel_ms)
-
-                rows.append({
-                    "subject": sid, "trial": trial, "run": run_num,
-                    "step": int(step), "label": int(label), "window": w,
-                    "event_timestamp": float(ev["event_timestamp"]),
-                    **window_features(cfg, wf, ws, we, lo, w_arg, group_names),
-                })
-
+    rows = [
+        {**keys, **window_features(cfg, wf, ws, we, lo, w, group_names)}
+        for keys, wf, ws, we, lo, w in event_windows(cfg, events_df, compute_window, run_fixations)
+    ]
     return pd.DataFrame(rows) if rows else pd.DataFrame(columns=EVENT_KEYS)
 
 
 def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
-    def compute_window(step_ts, eye_min, step, w, ts):
-        event_rel_ms = (ts - eye_min) * 1000.0
-        lo = event_rel_ms - w * 1000.0
-        return lo, event_rel_ms, w
-
-    return build_features_core(cfg, events_df, compute_window)
+    """Time windows: each starts `w` seconds before the event."""
+    return build_features_core(cfg, events_df, time_window)

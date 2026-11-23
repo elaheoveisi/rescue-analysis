@@ -73,12 +73,18 @@ def event_timeline(game: pd.DataFrame, auto_interval_steps: int) -> pd.DataFrame
     return pd.DataFrame(rows, columns=columns)
 
 
-def trial_event_timeline(store, game_key: str, interval: int) -> pd.DataFrame:
-    prefix = game_key.rsplit("/", 2)[0] + "/"
-    games = [store[k] for k in store.keys() if k.startswith(prefix) and k.endswith("/game")]
+def join_trial_games(games: list[pd.DataFrame]) -> pd.DataFrame:
+    """All runs' game logs of one trial as one time-ordered log."""
     # All-null optional fields differ across reset-only and active episodes.
     game = pd.concat([g.dropna(axis=1, how="all") for g in games], ignore_index=True).sort_values("timestamp", kind="stable")
-    return event_timeline(game.drop_duplicates("timestamp"), interval)
+    return game.drop_duplicates("timestamp")
+
+
+def trial_event_timeline(store, game_key: str, interval: int) -> pd.DataFrame:
+    """Help events of the whole trial that `game_key` belongs to."""
+    prefix = game_key.rsplit("/", 2)[0] + "/"
+    games = [store[k] for k in store.keys() if k.startswith(prefix) and k.endswith("/game")]
+    return event_timeline(join_trial_games(games), interval)
 
 
 def validate_eye_origin(frame: pd.DataFrame, origin: float) -> None:

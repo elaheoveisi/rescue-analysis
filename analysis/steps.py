@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
-from features.game_steps import event_timeline
+from features.game_steps import event_timeline, join_trial_games
 from prepare_data.data import process_subject
 
 with open("configs/analysis.yml") as f:
@@ -34,11 +34,7 @@ for sid in [str(s) for s in cfg["sub"]]:
         trial = next((t for t in trials if t in trial_id), None)
         if trial not in llm_trials:
             continue
-        # same run joining as trial_event_timeline() in features/game_steps.py
-        game = pd.concat(
-            [r["game"].dropna(axis=1, how="all") for r in runs.values()], ignore_index=True
-        ).sort_values("timestamp", kind="stable")
-        timeline = event_timeline(game.drop_duplicates("timestamp"), interval)
+        timeline = event_timeline(join_trial_games([r["game"] for r in runs.values()]), interval)
         auto += int((timeline["label"] == 0).sum())
         manual += int((timeline["label"] == 1).sum())
     rows.append({"subject": sid, "automatic": auto, "manual": manual, "total": auto + manual})
