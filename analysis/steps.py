@@ -10,11 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
-<<<<<<< Updated upstream
-from features.game_steps import event_timeline, join_trial_games
-=======
 from features.game_steps import games_event_timeline
->>>>>>> Stashed changes
 from prepare_data.data import process_subject
 
 with open("configs/analysis.yml") as f:
@@ -38,11 +34,7 @@ for sid in [str(s) for s in cfg["sub"]]:
         trial = next((t for t in trials if t in trial_id), None)
         if trial not in llm_trials:
             continue
-<<<<<<< Updated upstream
-        timeline = event_timeline(join_trial_games([r["game"] for r in runs.values()]), interval)
-=======
         timeline = games_event_timeline([r["game"] for r in runs.values()], interval)
->>>>>>> Stashed changes
         auto += int((timeline["label"] == 0).sum())
         manual += int((timeline["label"] == 1).sum())
     rows.append({"subject": sid, "automatic": auto, "manual": manual, "total": auto + manual})

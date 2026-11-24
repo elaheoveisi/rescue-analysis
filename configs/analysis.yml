@@ -91,8 +91,8 @@ info_request:
   negatives: offset # non-request moments: offset = the auto events N steps after the last info delivery; matched_random = random actions matched to each request on steps since the last delivery
   windows_s: [1,2,3,4,5,6,7,8,9,10] # seconds of look-back before each event
   stepwin_auto_intervals: [20,25, 30, 50] # stepwin reruns once per value (auto help every N actions); 50 = the game's real rule
-  stepwin_tag: fair8 # added to stepwin output names (e.g. *_stepwin_fair6_auto50.csv) so old files are kept; remove for plain names
-  step_windows: [1,2,3,4,5] # total_steps actions of look-back before each event (see classification/stepwin.py)
+  stepwin_tag: second_step # added to stepwin output names (e.g. *_stepwin_fair6_auto50.csv) so old files are kept; remove for plain names
+  step_windows: [2,3,4,5,6] # total_steps actions of look-back before each event (see classification/stepwin.py)
   meanwin_step_s: 1.07 # mean seconds per step (gemini+openai, P012 excluded); meanwin windows = k * this (see classification/meanwin.py)
   meanwin_steps: [8, 9, 10] # k values to run; window = k * meanwin_step_s
   min_fixations: 2 # below this, SGE/GTE for that window are left null
@@ -138,17 +138,17 @@ info_request:
       # gte,
       fixation_rate_hz,
       mean_fixation_dur_ms,
-      # dwell_time_ms,               # removed: grows with window length
-      fixation_dwell_fraction,       # fair version of dwell time (dwell / window length)
-      # n_saccades,                  # removed: grows with window length
+      dwell_time_ms,               # removed: grows with window length
+      #fixation_dwell_fraction,       # fair version of dwell time (dwell / window length)
+      n_saccades,                  # removed: grows with window length
       saccade_rate_hz,
-      # mean_saccade_dur_ms,         # removed: tracks window length
-      # peak_saccade_velocity_px_s,  # removed: tracks window length
-      # saccade_amp_sd_px,           # removed: tracks window length
+      mean_saccade_dur_ms,         # removed: tracks window length
+      peak_saccade_velocity_px_s,  # removed: tracks window length
+      saccade_amp_sd_px,           # removed: tracks window length
       mean_pupil_diameter,
       peak_pupil_diameter,
-      saccade_velocity_px_s,         # mean saccade velocity (fair replacement for peak); r with window length .14
-      mean_saccade_amp_px,           # mean saccade amplitude; r with window length .27
+      #saccade_velocity_px_s,         # mean saccade velocity (fair replacement for peak); r with window length .14
+      #mean_saccade_amp_px,           # mean saccade amplitude; r with window length .27
       # pupil_slope_per_s,
       # gaze_dispersion_px,
        #scanpath_length_rate_px_s,

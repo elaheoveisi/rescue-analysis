@@ -4,20 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from features.event_windows import load_run
 from features.eye_tracking_features import build_eye_features
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-from features.gaze_entropy import build_transition_matrix, gte as compute_gte, regroup_obj_type, sge as compute_sge
-from features.gaze_window_stats import (
-    blink_rate, event_rate, fixation_dwell_fraction, last_saccade_features,
-    pupil_trend, saccade_amplitude_sd, saccade_peak_velocity, saccade_velocity,
-    scanpath_length_rate,
-)
-
-
-from features.game_steps import EVENT_KEYS, action_timestamps, validate_eye_origin, window_slice
-from features.event_windows import (
-    event_windows, key_row, llm_runs, load_run, run_events, time_window, valid_window,
-=======
 from features.game_steps import (
     EVENT_KEYS,
     action_timestamps,
@@ -39,7 +27,6 @@ from features.gaze_window_stats import (
     saccade_peak_velocity,
     saccade_velocity,
     scanpath_length_rate,
->>>>>>> Stashed changes:analysis/classification/features.py
 )
 
 
@@ -49,9 +36,6 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
     how a window's start (`lo`, in ms) is derived from `w`, which is up to
     `get_lo(step_ts, eye_min, event_rel_ms, event_step, w) -> lo`.
     """
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-    hva_cfg = cfg["help_vs_auto"]
-=======
     hva_cfg = cfg["info_request"]
     exclude = set(hva_cfg.get("exclude_participants", []))
     group = hva_cfg.get(
@@ -59,7 +43,6 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
     )  # None = everyone; "expert"/"novice" = only that group
     expertise = cfg.get("expertise", {})
     llm_trials = hva_cfg.get("llm_trials", ["gemini", "openai"])  # pooled, not split
->>>>>>> Stashed changes:analysis/classification/features.py
     min_fix = hva_cfg.get("min_fixations", 2)
     interval = hva_cfg["auto_interval_steps"]
     groups = cfg["entropy_groups"]
@@ -71,12 +54,6 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
         lambda t: regroup_obj_type(t, groups)
     )
 
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-    rows, timelines = [], {}
-    with pd.HDFStore(str(processed / "data.h5"), mode="r") as store:
-        for sid, trial, run, gk in llm_runs(store, cfg):
-            sub_fix = fix_all[(fix_all["subject"] == sid) & (fix_all["trial"] == trial) & (fix_all["run"] == run)]
-=======
     rows = []
     timelines = {}
     rng = np.random.RandomState(hva_cfg.get("random_state", 42))
@@ -98,35 +75,19 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
                 & (fix_all["trial"] == trial)
                 & (fix_all["run"] == run_num)
             ]
->>>>>>> Stashed changes:analysis/classification/features.py
             if sub_fix.empty:
                 continue
-            loaded = load_run(store, sid, trial, run)
+            loaded = load_run(store, sid, trial, run_num)
             if loaded is None:
                 continue
             game, _, eye_min = loaded
             validate_eye_origin(sub_fix, eye_min)
             step_ts = action_timestamps(game)
 
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-            for _, ev in run_events(store, gk, game, interval, timelines).iterrows():
-                event_rel_ms = (ev["timestamp"] - eye_min) * 1000.0
-                for w in windows:
-                    lo = get_lo(step_ts, eye_min, event_rel_ms, ev["step"], w)
-                    if not valid_window(lo, event_rel_ms):
-                        continue
-                    win_fix = window_slice(sub_fix, "start_ms", lo, event_rel_ms)
-                    win_fix = win_fix[win_fix["obj_type_grouped"].isin(gte_types)]
-                    sge, gte = window_entropies(win_fix, gte_types) if len(win_fix) >= min_fix else (None, None)
-                    rows.append({
-                        **key_row(sid, trial, run, ev["step"], ev["label"], w, ev["timestamp"]),
-                        "event_basis": ev["event_basis"], "sge": sge, "gte": gte,
-                    })
-=======
             trial_key = (sid, trial)
             if trial_key not in timelines:
                 timelines[trial_key] = trial_event_timeline(
-                    store, gk, auto_interval_steps
+                    store, gk, interval
                 )
             timeline = timelines[trial_key]
             events = timeline[
@@ -175,24 +136,10 @@ def build_events_core(cfg: dict, windows: list, get_lo) -> pd.DataFrame:
                             "gte": gte,
                         }
                     )
->>>>>>> Stashed changes:analysis/classification/features.py
 
     return pd.DataFrame(rows) if rows else pd.DataFrame(columns=EVENT_KEYS)
 
 
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-def window_entropies(win_fix: pd.DataFrame, gte_types: list[str]) -> tuple[float, float]:
-    """(SGE, GTE) over the AOI-group fixations of one window."""
-    grouped = win_fix[["obj_type_grouped", "duration_ms"]].rename(columns={"obj_type_grouped": "obj_type"})
-    return compute_sge(grouped), compute_gte(build_transition_matrix(grouped, gte_types))
-
-
-def build_events(cfg: dict) -> pd.DataFrame:
-    """Time windows: each starts `w` seconds before the event."""
-    return build_events_core(
-        cfg, cfg["help_vs_auto"]["windows_s"],
-        get_lo=lambda step_ts, eye_min, event_rel_ms, event_step, w: event_rel_ms - w * 1000.0,
-=======
 def build_pause_events(cfg: dict) -> pd.DataFrame:
     """One row per pause (gap between consecutive actions) of at least tau, for each tau in pause_taus.
     The window is the first tau seconds of the pause. Request = the pause ends in an Alt press, non-request = it ends in the next action."""
@@ -257,7 +204,6 @@ def build_events(cfg: dict) -> pd.DataFrame:
         get_lo=lambda step_ts, eye_min, event_rel_ms, event_step, w, label=None: (
             event_rel_ms - (lead_ms if label == 1 else 0.0) - w * 1000.0
         ),
->>>>>>> Stashed changes:analysis/classification/features.py
     )
 
 
@@ -449,22 +395,6 @@ def kinematics(
     """AOI-free window features: fixation, saccade, pupil and gaze-spread kinematics."""
     eye_feats = build_eye_features(wf, ws, we, cfg["eyetracker"])
     n_fix, n_sacc = eye_feats["n_fixations"], eye_feats["n_saccades"]
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-
-    # AOI-category features (dwell, transitions, revisits, last-AOI) all reason
-    # about *which meaningful thing* gaze was on -- same principle SGE/GTE
-    # already use (entropy_groups excludes "other"/wall/offscreen). wf_aoi
-    # restricts to those categories so a glance at background terrain doesn't
-    # get treated as a real AOI, dilute a dwell fraction, or count as a
-    # transition/revisit. Raw kinematics below (fixation rate/duration, overall
-    # dwell fraction, dispersion) intentionally keep using the full `wf`,
-    # since those measure general visual engagement, not AOI identity.
-    wf_aoi = wf[wf["obj_type"].isin(group_names)]
-    dwell = dwell_fractions(wf_aoi, group_names)
-    recent = recent_dwell_fractions(wf, group_names, lo, w, cfg["help_vs_auto"].get("recent_window_s", 2))
-
-=======
->>>>>>> Stashed changes:analysis/classification/features.py
     return {
         "fixation_rate_hz": event_rate(n_fix, w),
         "mean_fixation_dur_ms": eye_feats["mean_fixation_dur_ms"],
@@ -486,22 +416,6 @@ def kinematics(
         "blink_rate_hz": blink_rate(we, w),
         **last_saccade_features(ws, we, cfg["eyetracker"]),
         **pupil_trend(we, lo, missing=cfg["eyetracker"].get("missing", 0.0)),
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-        **dwell,
-        **last_aoi_fixated(wf_aoi, group_names),
-        **last_transition(wf_aoi, "Interface"),
-        **recent,
-
-        # Per-group breakdown over the full `wf` (pct_dur is a fraction of
-        # window time, not of AOI-only time).
-        **pct_duration_by_group(wf, w, group_names),
-        **fixation_stats_by_group(wf, group_names),
-        **saccade_stats_by_group(ws, wf, group_names),
-        # Same values as `recent` above, under the "<group>_recent_dwell_fraction" names.
-        **{k.removeprefix("recent_").replace("_dwell_fraction", "_recent_dwell_fraction"): v
-           for k, v in recent.items()},
-=======
->>>>>>> Stashed changes:analysis/classification/features.py
     }
 
 
@@ -545,17 +459,8 @@ def build_features_core(
     (lo, event_rel_ms, w_arg) | None` (None skips the row).
     """
     groups = cfg["entropy_groups"]
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-    group_names = list(groups.keys())
-    fix_all = pd.read_csv(Path(cfg["paths"]["processed"]) / "object_aoi_fixations.csv")
-    fix_all["obj_type"] = fix_all["obj_type"].apply(lambda t: regroup_obj_type(t, groups))
-
-    def run_fixations(sid, trial, run):
-        return fix_all[
-            (fix_all["subject"] == sid) & (fix_all["trial"] == trial) & (fix_all["run"] == run)
-        ].sort_values("start_ms")
-=======
     group_names = list(groups)
+    processed = Path(cfg["paths"]["processed"])
     if aoi:
         fix_all = pd.read_csv(processed / "object_aoi_fixations.csv")
         fix_all["obj_type"] = fix_all["obj_type"].apply(
@@ -638,20 +543,10 @@ def build_features_core(
                         ),
                     }
                 )
->>>>>>> Stashed changes:analysis/classification/features.py
 
-    rows = [
-        {**keys, **window_features(cfg, wf, ws, we, lo, w, group_names)}
-        for keys, wf, ws, we, lo, w in event_windows(cfg, events_df, compute_window, run_fixations)
-    ]
     return pd.DataFrame(rows) if rows else pd.DataFrame(columns=EVENT_KEYS)
 
 
-<<<<<<< Updated upstream:analysis/features/help_vs_auto_features.py
-def build_features(cfg: dict, events_df: pd.DataFrame) -> pd.DataFrame:
-    """Time windows: each starts `w` seconds before the event."""
-    return build_features_core(cfg, events_df, time_window)
-=======
 def build_features(
     cfg: dict, events_df: pd.DataFrame, aoi: bool = True
 ) -> pd.DataFrame:
@@ -662,4 +557,3 @@ def build_features(
         return end_ms - w * 1000.0, end_ms, w
 
     return build_features_core(cfg, events_df, compute_window, aoi)
->>>>>>> Stashed changes:analysis/classification/features.py

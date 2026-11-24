@@ -79,7 +79,7 @@ with skip_run("run", "info_request_stepwin") as check, check():
     # "expert_to_novice", "novice_to_expert" -> train on one group, test on the other
     # (reuses the "all" features files)
     run_info_request_stepwin(
-        cfg, modes=["all", "expert", "novice", "expert_to_novice", "novice_to_expert"]
+        cfg, modes=["all"]
     )
 
 with skip_run("skip", "info_request_pause") as check, check():
